@@ -41,8 +41,8 @@ class SkyWidget(QWidget):
         self._mpl_canvas.mpl_connect('motion_notify_event', self._on_motion)
 
     def show_initial_view(self) -> None:
-        """Render the initial view centered on M84."""
-        self._sky_canvas.set_view(ra_deg=186.27, dec_deg=12.89, fov_deg=3.0)
+        """Render the initial view centered on M31."""
+        self._sky_canvas.set_view(ra_deg=10.685, dec_deg=41.269, fov_deg=3.0)
         self._sky_canvas.set_camera(DEFAULT_PROFILE, 0.0)
         self._emit_view_changed()
 

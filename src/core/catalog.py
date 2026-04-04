@@ -27,6 +27,7 @@ class CatalogObject:
     major_axis_arcmin: Optional[float]
     minor_axis_arcmin: Optional[float]
     constellation: Optional[str]
+    position_angle: Optional[float]
 
 
 # Catalog pattern matchers: (regex, catalog_name)
@@ -83,6 +84,7 @@ class CatalogSearchEngine:
                 major_axis_arcmin=row['major_axis'],
                 minor_axis_arcmin=row['minor_axis'],
                 constellation=row['constellation'],
+                position_angle=row['position_angle'] if 'position_angle' in row.keys() else None,
             )
             self._objects[obj.id] = obj
 

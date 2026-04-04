@@ -31,8 +31,8 @@ class SkyCanvas:
         self._image_artist = None
 
         # Current view parameters
-        self._ra_deg = 186.27   # M84
-        self._dec_deg = 12.89
+        self._ra_deg = 10.685   # M31
+        self._dec_deg = 41.269
         self._fov_deg = 3.0
         self._rotation_deg = 0.0
 

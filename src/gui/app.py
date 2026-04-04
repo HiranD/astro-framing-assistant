@@ -148,7 +148,7 @@ class FramingApp(QMainWindow):
         self._sky_widget.view_changed.connect(self._status_bar.update_fov)
 
         self._sky_widget.show_initial_view()
-        self._altitude_widget.set_target(186.27, 12.89)
+        self._altitude_widget.set_target(10.685, 41.269)
 
         self._status_bar.set_status(
             f"Loaded {self._tile_cache.tile_count} sky positions"

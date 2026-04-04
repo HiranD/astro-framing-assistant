@@ -336,8 +336,9 @@ class CatalogOverlay:
                 w = obj.major_axis_arcmin * pix_per_arcmin
                 h = (obj.minor_axis_arcmin or obj.major_axis_arcmin) * pix_per_arcmin
                 if w > 3:  # Only draw if visible
+                    pa = obj.position_angle if obj.position_angle is not None else 0
                     ellipse = Ellipse(
-                        xy=(px, py), width=w, height=h, angle=0,
+                        xy=(px, py), width=w, height=h, angle=90 + pa,
                         fill=False, edgecolor='cyan', alpha=0.3,
                         linewidth=0.7, transform=ax.transData,
                     )
