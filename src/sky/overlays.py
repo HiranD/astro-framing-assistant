@@ -12,6 +12,50 @@ from astropy.wcs import WCS
 import astropy.units as u
 
 from core.camera import CameraProfile
+from core.mosaic import MosaicPlan
+
+
+def _compute_fov_corners(
+    ra_deg: float,
+    dec_deg: float,
+    fov_w: float,
+    fov_h: float,
+    rotation_deg: float,
+) -> list[SkyCoord]:
+    """Compute 4 rotated FOV corners on the sky."""
+    rot = math.radians(rotation_deg)
+    half_w = fov_w / 2.0
+    half_h = fov_h / 2.0
+    cos_dec = max(math.cos(math.radians(dec_deg)), 0.01)
+
+    raw_corners = [
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
+    ]
+
+    cos_r = math.cos(rot)
+    sin_r = math.sin(rot)
+
+    sky_corners = []
+    for dx, dy in raw_corners:
+        rx = dx * cos_r - dy * sin_r
+        ry = dx * sin_r + dy * cos_r
+        corner_ra = ra_deg + rx / cos_dec
+        corner_dec = dec_deg + ry
+        sky_corners.append(SkyCoord(corner_ra, corner_dec, unit='deg'))
+
+    return sky_corners
+
+
+def _corners_to_pixels(corners: list[SkyCoord], canvas_wcs: WCS) -> list[list[float]]:
+    """Convert sky corners to pixel coordinates."""
+    px = []
+    for corner in corners:
+        x, y = canvas_wcs.world_to_pixel(corner)
+        px.append([float(x), float(y)])
+    return px
 
 
 class FovOverlay:
@@ -43,13 +87,8 @@ class FovOverlay:
 
         fov_w = camera.fov_width_deg
         fov_h = camera.fov_height_deg
-        corners = self._compute_corners(ra_deg, dec_deg, fov_w, fov_h, rotation_deg)
-
-        # Convert sky corners to pixel coordinates
-        px_corners = []
-        for corner in corners:
-            x, y = canvas_wcs.world_to_pixel(corner)
-            px_corners.append([float(x), float(y)])
+        corners = _compute_fov_corners(ra_deg, dec_deg, fov_w, fov_h, rotation_deg)
+        px_corners = _corners_to_pixels(corners, canvas_wcs)
 
         if not px_corners:
             return
@@ -117,39 +156,117 @@ class FovOverlay:
                 pass
         self._artists.clear()
 
-    def _compute_corners(
+
+
+class MosaicOverlay:
+    """Draws a mosaic grid of panel rectangles on the sky canvas."""
+
+    def __init__(self) -> None:
+        self._artists: list = []
+
+    def draw(
         self,
-        ra_deg: float,
-        dec_deg: float,
-        fov_w: float,
-        fov_h: float,
-        rotation_deg: float,
-    ) -> list[SkyCoord]:
-        """Compute 4 rotated FOV corners on the sky."""
-        rot = math.radians(rotation_deg)
-        half_w = fov_w / 2.0
-        half_h = fov_h / 2.0
-        cos_dec = math.cos(math.radians(dec_deg))
+        ax: Axes,
+        plan: MosaicPlan,
+        camera: CameraProfile,
+        canvas_wcs: WCS,
+    ) -> None:
+        """Draw all mosaic panels with labels and bounding box."""
+        self.clear()
 
-        # Corner offsets in tangent plane (degrees)
-        raw_corners = [
-            (-half_w, -half_h),
-            (half_w, -half_h),
-            (half_w, half_h),
-            (-half_w, half_h),
-        ]
+        fov_w = camera.fov_width_deg
+        fov_h = camera.fov_height_deg
 
-        cos_r = math.cos(rot)
-        sin_r = math.sin(rot)
+        for panel in plan.panels:
+            corners = _compute_fov_corners(
+                panel.ra_deg, panel.dec_deg,
+                fov_w, fov_h, panel.rotation_deg,
+            )
+            px_corners = _corners_to_pixels(corners, canvas_wcs)
 
-        sky_corners = []
-        for dx, dy in raw_corners:
-            # Apply rotation
-            rx = dx * cos_r - dy * sin_r
-            ry = dx * sin_r + dy * cos_r
-            # Project onto sphere (RA corrected for cos(dec))
-            corner_ra = ra_deg + rx / cos_dec
-            corner_dec = dec_deg + ry
-            sky_corners.append(SkyCoord(corner_ra, corner_dec, unit='deg'))
+            # Panel border
+            closed = px_corners + [px_corners[0]]
+            xs = [c[0] for c in closed]
+            ys = [c[1] for c in closed]
+            border = Line2D(
+                xs, ys,
+                color='#4488ff', alpha=0.6, linewidth=1.0,
+                transform=ax.transData,
+            )
+            ax.add_line(border)
+            self._artists.append(border)
 
-        return sky_corners
+            # Semi-transparent fill
+            poly = Polygon(
+                px_corners, closed=True,
+                facecolor='#4488ff', alpha=0.04, linewidth=0,
+                transform=ax.transData,
+            )
+            ax.add_patch(poly)
+            self._artists.append(poly)
+
+            # Panel label at center
+            cx = sum(c[0] for c in px_corners) / 4.0
+            cy = sum(c[1] for c in px_corners) / 4.0
+            label = ax.text(
+                cx, cy, panel.label,
+                color='white', fontsize=7, alpha=0.7,
+                ha='center', va='center',
+                transform=ax.transData,
+            )
+            self._artists.append(label)
+
+        # Bounding box around entire mosaic
+        all_corners = []
+        for panel in plan.panels:
+            corners = _compute_fov_corners(
+                panel.ra_deg, panel.dec_deg,
+                fov_w, fov_h, panel.rotation_deg,
+            )
+            all_corners.extend(_corners_to_pixels(corners, canvas_wcs))
+
+        if all_corners:
+            min_x = min(c[0] for c in all_corners)
+            max_x = max(c[0] for c in all_corners)
+            min_y = min(c[1] for c in all_corners)
+            max_y = max(c[1] for c in all_corners)
+            bbox = Line2D(
+                [min_x, max_x, max_x, min_x, min_x],
+                [min_y, min_y, max_y, max_y, min_y],
+                color='white', alpha=0.4, linewidth=1.0,
+                linestyle='--', transform=ax.transData,
+            )
+            ax.add_line(bbox)
+            self._artists.append(bbox)
+
+        # Center crosshair
+        center = SkyCoord(plan.center_ra, plan.center_dec, unit='deg')
+        cx, cy = canvas_wcs.world_to_pixel(center)
+        cx, cy = float(cx), float(cy)
+        cross_size = 10
+        for coords in [([cx - cross_size, cx + cross_size], [cy, cy]),
+                       ([cx, cx], [cy - cross_size, cy + cross_size])]:
+            line = Line2D(
+                coords[0], coords[1],
+                color='#ff6644', alpha=0.8, linewidth=1.5,
+                transform=ax.transData,
+            )
+            ax.add_line(line)
+            self._artists.append(line)
+
+        # Total FOV label
+        total_label = ax.text(
+            max_x + 5, max_y + 5,
+            f"Mosaic: {plan.total_fov_w_deg:.2f}° × {plan.total_fov_h_deg:.2f}°",
+            color='white', fontsize=8, alpha=0.7,
+            transform=ax.transData,
+        )
+        self._artists.append(total_label)
+
+    def clear(self) -> None:
+        for artist in self._artists:
+            try:
+                artist.remove()
+            except ValueError:
+                pass
+        self._artists.clear()

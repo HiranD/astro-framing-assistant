@@ -11,8 +11,9 @@ from astropy.wcs import WCS
 from sky.wcs_utils import build_canvas_wcs
 from sky.tile_renderer import TileRenderer
 from sky.tile_cache import TileCache
-from sky.overlays import FovOverlay
+from sky.overlays import FovOverlay, MosaicOverlay
 from core.camera import CameraProfile
+from core.mosaic import MosaicPlan, compute_mosaic
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,13 @@ class SkyCanvas:
 
         # Overlays
         self._fov_overlay = FovOverlay()
+        self._mosaic_overlay = MosaicOverlay()
         self._camera = None
         self._camera_rotation = 0.0
+        self._h_panels = 1
+        self._v_panels = 1
+        self._overlap_pct = 10.0
+        self._mosaic_plan = None
 
     @property
     def figure(self) -> Figure:
@@ -147,6 +153,7 @@ class SkyCanvas:
         overlay[1].set_axislabel_position('l')
 
         # Draw overlays
+        self._recompute_mosaic()
         self._draw_overlays()
 
         self._figure.canvas.draw_idle()
@@ -156,18 +163,51 @@ class SkyCanvas:
         self._camera = camera
         if rotation_deg is not None:
             self._camera_rotation = rotation_deg
+        self._recompute_mosaic()
         self._redraw_overlays()
 
     def set_camera_rotation(self, rotation_deg: float) -> None:
         """Set camera rotation and redraw overlay."""
         self._camera_rotation = rotation_deg
+        self._recompute_mosaic()
         self._redraw_overlays()
+
+    def set_mosaic(self, h_panels: int, v_panels: int, overlap_pct: float) -> None:
+        """Set mosaic parameters and redraw overlay."""
+        self._h_panels = max(1, h_panels)
+        self._v_panels = max(1, v_panels)
+        self._overlap_pct = overlap_pct
+        self._recompute_mosaic()
+        self._redraw_overlays()
+
+    @property
+    def mosaic_plan(self) -> MosaicPlan:
+        return self._mosaic_plan
+
+    def _recompute_mosaic(self) -> None:
+        """Recompute the mosaic plan from current state."""
+        if self._camera is None:
+            self._mosaic_plan = None
+            return
+        self._mosaic_plan = compute_mosaic(
+            self._ra_deg, self._dec_deg,
+            self._camera.fov_width_deg, self._camera.fov_height_deg,
+            self._h_panels, self._v_panels,
+            self._overlap_pct, self._camera_rotation,
+        )
 
     def _draw_overlays(self) -> None:
         """Draw all overlays on the current axes."""
-        if self._ax is None or self._wcs is None:
+        if self._ax is None or self._wcs is None or self._camera is None:
             return
-        if self._camera is not None:
+
+        is_mosaic = self._h_panels > 1 or self._v_panels > 1
+
+        if is_mosaic and self._mosaic_plan is not None:
+            self._mosaic_overlay.draw(
+                self._ax, self._mosaic_plan, self._camera, self._wcs,
+            )
+        else:
             self._fov_overlay.draw(
                 self._ax, self._ra_deg, self._dec_deg,
                 self._camera, self._camera_rotation, self._wcs,
@@ -178,5 +218,6 @@ class SkyCanvas:
         if self._ax is None or self._wcs is None:
             return
         self._fov_overlay.clear()
+        self._mosaic_overlay.clear()
         self._draw_overlays()
         self._figure.canvas.draw_idle()
