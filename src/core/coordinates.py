@@ -10,13 +10,14 @@ class NameResolveError(Exception):
     pass
 
 
-def resolve_name(name: str) -> SkyCoord:
+def resolve_name(name: str, catalog_engine=None) -> SkyCoord:
     """Resolve an astronomical object name to coordinates.
 
-    Uses Sesame/CDS via astropy. Offline catalog resolution added in Phase 6.
+    Uses local catalog DB first (offline), falls back to Sesame/CDS.
 
     Args:
         name: Object name (e.g. "M31", "NGC 7000", "Vega").
+        catalog_engine: Optional CatalogSearchEngine for offline lookup.
 
     Returns:
         SkyCoord with resolved coordinates.
@@ -24,6 +25,14 @@ def resolve_name(name: str) -> SkyCoord:
     Raises:
         NameResolveError: If the name cannot be resolved.
     """
+    # Try local catalog first (offline, instant)
+    if catalog_engine is not None:
+        results = catalog_engine.search_by_name(name, max_results=1)
+        if results:
+            obj, score = results[0]
+            return SkyCoord(obj.ra_deg, obj.dec_deg, unit='deg')
+
+    # Fallback to online resolution
     try:
         return SkyCoord.from_name(name)
     except Exception as e:

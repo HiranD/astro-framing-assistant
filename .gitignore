@@ -12,3 +12,4 @@ wheels/
 
 
 FramingAssistantCache
+data/*.db
