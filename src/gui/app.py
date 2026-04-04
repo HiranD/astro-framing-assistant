@@ -100,6 +100,7 @@ class FramingApp(QMainWindow):
         self._control_panel.fov_changed.connect(self._sky_widget.set_fov)
         self._control_panel.camera_changed.connect(self._sky_widget.set_camera)
         self._control_panel.rotation_changed.connect(self._sky_widget.set_camera_rotation)
+        self._control_panel.mosaic_changed.connect(self._sky_widget.set_mosaic)
         self._sky_widget.cursor_moved.connect(self._status_bar.update_cursor)
         self._sky_widget.view_changed.connect(self._control_panel.update_display)
         self._sky_widget.view_changed.connect(self._status_bar.update_fov)

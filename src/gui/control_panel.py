@@ -41,6 +41,7 @@ class ControlPanel(QWidget):
     fov_changed = pyqtSignal(float)
     camera_changed = pyqtSignal(object)      # CameraProfile
     rotation_changed = pyqtSignal(float)
+    mosaic_changed = pyqtSignal(int, int, float)  # h_panels, v_panels, overlap_pct
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -146,6 +147,41 @@ class ControlPanel(QWidget):
 
         layout.addWidget(cam_group)
 
+        # --- Mosaic ---
+        mosaic_group = QGroupBox("Mosaic")
+        mosaic_layout = QFormLayout(mosaic_group)
+
+        self._h_panels_spin = QSpinBox()
+        self._h_panels_spin.setRange(1, 10)
+        self._h_panels_spin.setValue(1)
+        self._h_panels_spin.valueChanged.connect(self._on_mosaic_changed)
+        mosaic_layout.addRow("H Panels:", self._h_panels_spin)
+
+        self._v_panels_spin = QSpinBox()
+        self._v_panels_spin.setRange(1, 10)
+        self._v_panels_spin.setValue(1)
+        self._v_panels_spin.valueChanged.connect(self._on_mosaic_changed)
+        mosaic_layout.addRow("V Panels:", self._v_panels_spin)
+
+        self._overlap_spin = QDoubleSpinBox()
+        self._overlap_spin.setRange(0, 50)
+        self._overlap_spin.setDecimals(1)
+        self._overlap_spin.setSingleStep(1.0)
+        self._overlap_spin.setValue(10.0)
+        self._overlap_spin.setSuffix(" %")
+        self._overlap_spin.valueChanged.connect(self._on_mosaic_changed)
+        mosaic_layout.addRow("Overlap:", self._overlap_spin)
+
+        self._mosaic_fov_label = QLabel("--")
+        self._mosaic_fov_label.setStyleSheet("color: #4488ff; font-size: 11px;")
+        mosaic_layout.addRow("Total:", self._mosaic_fov_label)
+
+        self._export_btn = QPushButton("Copy Coords to Clipboard")
+        self._export_btn.clicked.connect(self._on_export)
+        mosaic_layout.addRow(self._export_btn)
+
+        layout.addWidget(mosaic_group)
+
         # --- Field of View ---
         fov_group = QGroupBox("View FOV")
         fov_layout = QFormLayout(fov_group)
@@ -236,3 +272,42 @@ class ControlPanel(QWidget):
     def _on_rotation_changed(self, value: float) -> None:
         if not self._updating:
             self.rotation_changed.emit(value)
+
+    def _on_mosaic_changed(self) -> None:
+        if self._updating:
+            return
+        h = self._h_panels_spin.value()
+        v = self._v_panels_spin.value()
+        overlap = self._overlap_spin.value()
+        self.mosaic_changed.emit(h, v, overlap)
+        self._update_mosaic_label()
+
+    def _update_mosaic_label(self) -> None:
+        """Update the total mosaic FOV label."""
+        cam = self._build_camera()
+        h = self._h_panels_spin.value()
+        v = self._v_panels_spin.value()
+        overlap = self._overlap_spin.value() / 100.0
+        total_w = cam.fov_width_deg + (h - 1) * cam.fov_width_deg * (1 - overlap)
+        total_h = cam.fov_height_deg + (v - 1) * cam.fov_height_deg * (1 - overlap)
+        self._mosaic_fov_label.setText(f"{total_w:.2f}° × {total_h:.2f}°")
+
+    def _on_export(self) -> None:
+        """Export mosaic coordinates to clipboard."""
+        from PyQt6.QtWidgets import QApplication
+        from core.mosaic import compute_mosaic, export_csv
+
+        cam = self._build_camera()
+        ra = parse_ra(self._ra_edit.text()) if self._ra_edit.text() else 0.0
+        dec = parse_dec(self._dec_edit.text()) if self._dec_edit.text() else 0.0
+
+        plan = compute_mosaic(
+            ra, dec,
+            cam.fov_width_deg, cam.fov_height_deg,
+            self._h_panels_spin.value(), self._v_panels_spin.value(),
+            self._overlap_spin.value(), self._rotation_spin.value(),
+        )
+        csv_text = export_csv(plan)
+        QApplication.clipboard().setText(csv_text)
+        self._search_status.setText("Coords copied to clipboard")
+        self._search_status.setStyleSheet("color: lightgreen; font-size: 11px;")
