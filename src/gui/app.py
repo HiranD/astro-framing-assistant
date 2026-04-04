@@ -9,10 +9,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from config import load_config, save_config
+from core.visibility import ObserverConfig
 from sky.tile_cache import TileCache
 from gui.sky_widget import SkyWidget
 from gui.control_panel import ControlPanel
+from gui.altitude_widget import AltitudeWidget
 from gui.status_bar import StatusBar
+from gui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,14 @@ class FramingApp(QMainWindow):
         self._tile_cache = None
         self._sky_widget = None
 
+        # Observer config
+        self._observer_config = ObserverConfig(
+            latitude=self._config.get('observer_latitude', 6.9271),
+            longitude=self._config.get('observer_longitude', 79.8612),
+            elevation=self._config.get('observer_elevation', 0.0),
+            timezone=self._config.get('observer_timezone', 'Asia/Colombo'),
+        )
+
         # Control panel (left)
         self._control_panel = ControlPanel()
         left_dock = QDockWidget("Controls", self)
@@ -40,9 +51,10 @@ class FramingApp(QMainWindow):
         left_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
 
-        # Placeholder bottom panel (Phase 5: altitude chart)
+        # Altitude chart (bottom)
+        self._altitude_widget = AltitudeWidget(self._observer_config)
         bottom_dock = QDockWidget("Altitude", self)
-        bottom_dock.setWidget(QWidget())
+        bottom_dock.setWidget(self._altitude_widget)
         bottom_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, bottom_dock)
 
@@ -59,6 +71,9 @@ class FramingApp(QMainWindow):
 
         set_cache_action = file_menu.addAction("Set Cache Path...")
         set_cache_action.triggered.connect(self._on_set_cache_path)
+
+        settings_action = file_menu.addAction("Settings...")
+        settings_action.triggered.connect(self._on_settings)
 
         file_menu.addSeparator()
 
@@ -97,6 +112,7 @@ class FramingApp(QMainWindow):
 
         # Wire signals
         self._control_panel.target_changed.connect(self._sky_widget.set_center)
+        self._control_panel.target_changed.connect(self._altitude_widget.set_target)
         self._control_panel.fov_changed.connect(self._sky_widget.set_fov)
         self._control_panel.camera_changed.connect(self._sky_widget.set_camera)
         self._control_panel.rotation_changed.connect(self._sky_widget.set_camera_rotation)
@@ -106,6 +122,9 @@ class FramingApp(QMainWindow):
         self._sky_widget.view_changed.connect(self._status_bar.update_fov)
 
         self._sky_widget.show_initial_view()
+
+        # Compute altitude for initial target (M84)
+        self._altitude_widget.set_target(186.27, 12.89)
 
         self._status_bar.set_status(
             f"Loaded {self._tile_cache.tile_count} sky positions"
@@ -124,6 +143,12 @@ class FramingApp(QMainWindow):
         self._config['cache_path'] = path
         save_config(self._config)
         self._load_cache(path)
+
+    def _on_settings(self) -> None:
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self._observer_config = dialog.get_observer_config()
+            self._altitude_widget.update_observer(self._observer_config)
 
     def closeEvent(self, event) -> None:
         size = self.size()
