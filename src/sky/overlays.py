@@ -5,7 +5,7 @@ from typing import Optional
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Polygon
+from matplotlib.patches import Polygon, Ellipse
 from matplotlib.lines import Line2D
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
@@ -13,6 +13,7 @@ import astropy.units as u
 
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan
+from core.catalog import CatalogSearchEngine, CatalogObject
 
 
 def _compute_fov_corners(
@@ -152,7 +153,7 @@ class FovOverlay:
         for artist in self._artists:
             try:
                 artist.remove()
-            except ValueError:
+            except Exception:
                 pass
         self._artists.clear()
 
@@ -267,6 +268,111 @@ class MosaicOverlay:
         for artist in self._artists:
             try:
                 artist.remove()
-            except ValueError:
+            except Exception:
+                pass
+        self._artists.clear()
+
+
+class CatalogOverlay:
+    """Draws catalog object labels and size ellipses on the sky canvas."""
+
+    def __init__(self) -> None:
+        self._artists: list = []
+        self._enabled = True
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+
+    def draw(
+        self,
+        ax: Axes,
+        canvas_wcs: WCS,
+        fov_deg: float,
+        catalog_engine: CatalogSearchEngine,
+        ra_deg: float,
+        dec_deg: float,
+    ) -> None:
+        """Draw catalog labels and ellipses for objects in the current view."""
+        self.clear()
+
+        if not self._enabled or catalog_engine is None:
+            return
+
+        # Determine magnitude limit based on FOV
+        if fov_deg > 10:
+            mag_limit = 8.0
+        elif fov_deg > 3:
+            mag_limit = 12.0
+        elif fov_deg > 1:
+            mag_limit = 15.0
+        else:
+            mag_limit = None
+
+        objects = catalog_engine.search_region(
+            ra_deg, dec_deg, fov_deg * 0.7, mag_limit=mag_limit,
+        )
+
+        # Sort by magnitude (brightest first) for label priority
+        objects.sort(key=lambda o: o.magnitude if o.magnitude is not None else 99)
+
+        # Pixel scale for size ellipses
+        pixel_scale = abs(canvas_wcs.wcs.cd[0][0])  # deg/pixel
+        pix_per_arcmin = 1.0 / (pixel_scale * 60.0)
+
+        # Track label positions to avoid overlap
+        label_boxes = []
+        max_labels = 60
+
+        for obj in objects[:max_labels * 2]:
+            try:
+                coord = SkyCoord(obj.ra_deg, obj.dec_deg, unit='deg')
+                px, py = canvas_wcs.world_to_pixel(coord)
+                px, py = float(px), float(py)
+            except Exception:
+                continue
+
+            # Size ellipse
+            if obj.major_axis_arcmin and obj.major_axis_arcmin > 0:
+                w = obj.major_axis_arcmin * pix_per_arcmin
+                h = (obj.minor_axis_arcmin or obj.major_axis_arcmin) * pix_per_arcmin
+                if w > 3:  # Only draw if visible
+                    ellipse = Ellipse(
+                        xy=(px, py), width=w, height=h, angle=0,
+                        fill=False, edgecolor='cyan', alpha=0.3,
+                        linewidth=0.7, transform=ax.transData,
+                    )
+                    ax.add_patch(ellipse)
+                    self._artists.append(ellipse)
+
+            # Label (check overlap)
+            if len(label_boxes) >= max_labels:
+                continue
+
+            lx, ly = px + 8, py + 8
+            overlaps = False
+            for bx, by in label_boxes:
+                if abs(lx - bx) < 60 and abs(ly - by) < 12:
+                    overlaps = True
+                    break
+
+            if not overlaps:
+                # Use short name
+                display = obj.name
+                if obj.catalog == 'Messier':
+                    display = f"M{obj.catalog_number.lstrip('0')}"
+
+                label = ax.text(
+                    lx, ly, display,
+                    color='#aaddff', fontsize=6, alpha=0.7,
+                    transform=ax.transData,
+                )
+                self._artists.append(label)
+                label_boxes.append((lx, ly))
+
+    def clear(self) -> None:
+        for artist in self._artists:
+            try:
+                artist.remove()
+            except Exception:
                 pass
         self._artists.clear()

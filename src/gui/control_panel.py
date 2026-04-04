@@ -22,13 +22,14 @@ class _NameResolveWorker(QThread):
     resolved = pyqtSignal(float, float, str)
     error = pyqtSignal(str)
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, catalog_engine=None) -> None:
         super().__init__()
         self._name = name
+        self._catalog_engine = catalog_engine
 
     def run(self) -> None:
         try:
-            coord = resolve_name(self._name)
+            coord = resolve_name(self._name, self._catalog_engine)
             self.resolved.emit(coord.ra.deg, coord.dec.deg, self._name)
         except NameResolveError as e:
             self.error.emit(str(e))
@@ -48,6 +49,7 @@ class ControlPanel(QWidget):
         self.setFixedWidth(300)
         self._worker = None
         self._updating = False
+        self._catalog_engine = None
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -217,6 +219,10 @@ class ControlPanel(QWidget):
         self._fov_label.setText(f"{cam.fov_width_deg:.2f}° × {cam.fov_height_deg:.2f}°")
         self._scale_label.setText(f"{cam.pixel_scale_arcsec:.2f} arcsec/px")
 
+    def set_catalog_engine(self, engine) -> None:
+        """Set the catalog engine for offline name resolution."""
+        self._catalog_engine = engine
+
     def update_display(self, ra_deg: float, dec_deg: float, fov_deg: float) -> None:
         """Update displayed coordinates and FOV (called when view changes)."""
         self._updating = True
@@ -232,7 +238,7 @@ class ControlPanel(QWidget):
         self._search_status.setText("Resolving...")
         self._search_status.setStyleSheet("color: yellow; font-size: 11px;")
         self._search_btn.setEnabled(False)
-        self._worker = _NameResolveWorker(name)
+        self._worker = _NameResolveWorker(name, self._catalog_engine)
         self._worker.resolved.connect(self._on_name_resolved)
         self._worker.error.connect(self._on_name_error)
         self._worker.start()

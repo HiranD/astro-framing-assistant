@@ -11,9 +11,10 @@ from astropy.wcs import WCS
 from sky.wcs_utils import build_canvas_wcs
 from sky.tile_renderer import TileRenderer
 from sky.tile_cache import TileCache
-from sky.overlays import FovOverlay, MosaicOverlay
+from sky.overlays import FovOverlay, MosaicOverlay, CatalogOverlay
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan, compute_mosaic
+from core.catalog import CatalogSearchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class SkyCanvas:
         # Overlays
         self._fov_overlay = FovOverlay()
         self._mosaic_overlay = MosaicOverlay()
+        self._catalog_overlay = CatalogOverlay()
+        self._catalog_engine = None
         self._camera = None
         self._camera_rotation = 0.0
         self._h_panels = 1
@@ -196,9 +199,23 @@ class SkyCanvas:
             self._overlap_pct, self._camera_rotation,
         )
 
+    def set_catalog_engine(self, engine: CatalogSearchEngine) -> None:
+        """Set the catalog engine for label overlay."""
+        self._catalog_engine = engine
+
     def _draw_overlays(self) -> None:
         """Draw all overlays on the current axes."""
-        if self._ax is None or self._wcs is None or self._camera is None:
+        if self._ax is None or self._wcs is None:
+            return
+
+        # Catalog labels
+        if self._catalog_engine is not None:
+            self._catalog_overlay.draw(
+                self._ax, self._wcs, self._fov_deg,
+                self._catalog_engine, self._ra_deg, self._dec_deg,
+            )
+
+        if self._camera is None:
             return
 
         is_mosaic = self._h_panels > 1 or self._v_panels > 1
@@ -219,5 +236,6 @@ class SkyCanvas:
             return
         self._fov_overlay.clear()
         self._mosaic_overlay.clear()
+        self._catalog_overlay.clear()
         self._draw_overlays()
         self._figure.canvas.draw_idle()

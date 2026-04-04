@@ -10,12 +10,14 @@ from PyQt6.QtCore import Qt
 
 from config import load_config, save_config
 from core.visibility import ObserverConfig
+from core.catalog import CatalogSearchEngine
 from sky.tile_cache import TileCache
 from gui.sky_widget import SkyWidget
 from gui.control_panel import ControlPanel
 from gui.altitude_widget import AltitudeWidget
 from gui.status_bar import StatusBar
 from gui.settings_dialog import SettingsDialog
+from gui.catalog_dialog import CatalogDialog
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +37,15 @@ class FramingApp(QMainWindow):
 
         self._tile_cache = None
         self._sky_widget = None
+        self._catalog_engine = None
+        self._catalog_dialog = None
 
         # Observer config
         self._observer_config = ObserverConfig(
-            latitude=self._config.get('observer_latitude', 6.9271),
-            longitude=self._config.get('observer_longitude', 79.8612),
+            latitude=self._config.get('observer_latitude', 0.0),
+            longitude=self._config.get('observer_longitude', 0.0),
             elevation=self._config.get('observer_elevation', 0.0),
-            timezone=self._config.get('observer_timezone', 'Asia/Colombo'),
+            timezone=self._config.get('observer_timezone', 'UTC'),
         )
 
         # Control panel (left)
@@ -63,6 +67,7 @@ class FramingApp(QMainWindow):
         self.setStatusBar(self._status_bar)
 
         self._setup_menu()
+        self._load_catalog()
         self._try_load_cache()
 
     def _setup_menu(self) -> None:
@@ -79,6 +84,23 @@ class FramingApp(QMainWindow):
 
         exit_action = file_menu.addAction("E&xit")
         exit_action.triggered.connect(self.close)
+
+        view_menu = menu_bar.addMenu("&View")
+        atlas_action = view_menu.addAction("Sky Atlas...")
+        atlas_action.triggered.connect(self._on_sky_atlas)
+
+    def _load_catalog(self) -> None:
+        """Load the catalog database."""
+        app_dir = Path(__file__).resolve().parent.parent.parent
+        db_path = app_dir / 'data' / 'astro_objects.db'
+        if db_path.exists():
+            self._catalog_engine = CatalogSearchEngine(str(db_path))
+            self._control_panel.set_catalog_engine(self._catalog_engine)
+            self._status_bar.set_status(
+                f"Catalog: {self._catalog_engine.object_count} objects loaded"
+            )
+        else:
+            logger.warning("Catalog DB not found at %s", db_path)
 
     def _try_load_cache(self) -> None:
         cache_path = self._config.get('cache_path')
@@ -110,6 +132,10 @@ class FramingApp(QMainWindow):
         self._sky_widget = SkyWidget(self._tile_cache, self)
         self.setCentralWidget(self._sky_widget)
 
+        # Set catalog engine on sky canvas
+        if self._catalog_engine:
+            self._sky_widget.sky_canvas.set_catalog_engine(self._catalog_engine)
+
         # Wire signals
         self._control_panel.target_changed.connect(self._sky_widget.set_center)
         self._control_panel.target_changed.connect(self._altitude_widget.set_target)
@@ -122,8 +148,6 @@ class FramingApp(QMainWindow):
         self._sky_widget.view_changed.connect(self._status_bar.update_fov)
 
         self._sky_widget.show_initial_view()
-
-        # Compute altitude for initial target (M84)
         self._altitude_widget.set_target(186.27, 12.89)
 
         self._status_bar.set_status(
@@ -149,6 +173,25 @@ class FramingApp(QMainWindow):
         if dialog.exec():
             self._observer_config = dialog.get_observer_config()
             self._altitude_widget.update_observer(self._observer_config)
+
+    def _on_sky_atlas(self) -> None:
+        """Open the Sky Atlas catalog search dialog."""
+        if self._catalog_engine is None:
+            QMessageBox.warning(self, "No Catalog", "Catalog database not found.")
+            return
+
+        if self._catalog_dialog is None:
+            self._catalog_dialog = CatalogDialog(self._catalog_engine, self)
+            self._catalog_dialog.target_selected.connect(self._on_atlas_target)
+
+        self._catalog_dialog.show()
+        self._catalog_dialog.raise_()
+
+    def _on_atlas_target(self, ra: float, dec: float, name: str) -> None:
+        """Handle target selected from Sky Atlas."""
+        if self._sky_widget:
+            self._sky_widget.set_center(ra, dec)
+        self._altitude_widget.set_target(ra, dec)
 
     def closeEvent(self, event) -> None:
         size = self.size()
