@@ -4,6 +4,15 @@ import sys
 import os
 from multiprocessing import freeze_support
 
+# Set macOS app name in menu bar (must run before any Qt imports)
+if sys.platform == 'darwin':
+    try:
+        from Foundation import NSBundle
+        info = NSBundle.mainBundle().infoDictionary()
+        info['CFBundleName'] = 'Astro Framing Assistant'
+    except Exception:
+        pass
+
 # Add src/ to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 

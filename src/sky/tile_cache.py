@@ -158,16 +158,22 @@ class TileCache:
     def load_tile(self, tile: TileInfo) -> np.ndarray:
         """Load a tile JPEG as a numpy array.
 
+        The image is flipped vertically so that row 0 is the bottom (Dec min),
+        matching the WCS convention where y increases with Dec.
+
         Returns:
             RGB numpy array with shape (H, W, 3), dtype uint8.
         """
         img = Image.open(tile.filepath)
         if img.mode != 'RGB':
             img = img.convert('RGB')
-        return np.array(img)
+        return np.flipud(np.array(img))
 
     def build_tile_wcs(self, tile: TileInfo) -> WCS:
-        """Build a WCS for a tile (TAN projection centered on tile RA/Dec).
+        """Build a WCS for a tile using plate carree (CAR) projection.
+
+        N.I.N.A. tiles use plate carree with RA scaled by 1/cos(dec),
+        so each tile covers 5° in Dec but 5°/cos(dec) in RA.
 
         Args:
             tile: The tile to build WCS for.
@@ -176,12 +182,14 @@ class TileCache:
             An astropy WCS describing the tile's sky coverage.
         """
         w = WCS(naxis=2)
-        w.wcs.crpix = [tile.size_px / 2.0, tile.size_px / 2.0]
+        w.wcs.crpix = [tile.size_px / 2.0 + 0.5, tile.size_px / 2.0 + 0.5]
         w.wcs.crval = [tile.ra_deg, tile.dec_deg]
-        w.wcs.ctype = ['RA---TAN', 'DEC--TAN']
+        w.wcs.ctype = ['RA---STG', 'DEC--STG']
 
-        pixel_scale = TILE_FOV_DEG / tile.size_px  # deg/pixel
-        # No rotation, RA increases to the left (negative CD1_1)
+        # N.I.N.A. uses Stereographic (STG) projection via hips2fits
+        # FOV is the full tile coverage, pixel scale = FOV / size
+        pixel_scale = TILE_FOV_DEG / tile.size_px
+
         w.wcs.cd = [
             [-pixel_scale, 0.0],
             [0.0, pixel_scale],

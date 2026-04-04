@@ -18,6 +18,8 @@ def run_app() -> None:
     from gui.app import FramingApp
 
     app = QApplication(sys.argv)
+    app.setApplicationName("Astro Framing Assistant")
+    app.setOrganizationName("AstroFraming")
     qdarktheme.setup_theme('dark')
 
     window = FramingApp()

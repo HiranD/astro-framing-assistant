@@ -10,6 +10,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.2.6",
     "pillow>=12.2.0",
+    "pyobjc-framework-cocoa>=12.1; sys_platform == 'darwin'",
     "pyqt6>=6.11.0",
     "pyqtdarktheme>=2.1.0",
     "reproject>=0.14.1",

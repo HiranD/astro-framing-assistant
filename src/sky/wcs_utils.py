@@ -31,6 +31,7 @@ def build_canvas_wcs(
     w.wcs.ctype = ['RA---TAN', 'DEC--TAN']
 
     pixel_scale = fov_deg / max(width_px, height_px)  # deg/pixel
+
     rot = math.radians(rotation_deg)
     cos_r = math.cos(rot)
     sin_r = math.sin(rot)
