@@ -18,6 +18,7 @@ from gui.altitude_widget import AltitudeWidget
 from gui.status_bar import StatusBar
 from gui.settings_dialog import SettingsDialog
 from gui.catalog_dialog import CatalogDialog
+from gui.image_source_panel import ImageSourcePanel
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,14 @@ class FramingApp(QMainWindow):
         bottom_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, bottom_dock)
 
+        # Image source panel (right)
+        self._image_panel = ImageSourcePanel(self._config)
+        right_dock = QDockWidget("Image Sources", self)
+        right_dock.setWidget(self._image_panel)
+        right_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
+        self._right_dock = right_dock
+
         # Status bar
         self._status_bar = StatusBar(self)
         self.setStatusBar(self._status_bar)
@@ -88,6 +97,9 @@ class FramingApp(QMainWindow):
         view_menu = menu_bar.addMenu("&View")
         atlas_action = view_menu.addAction("Sky Atlas...")
         atlas_action.triggered.connect(self._on_sky_atlas)
+
+        images_action = view_menu.addAction("Image Sources")
+        images_action.triggered.connect(lambda: self._right_dock.show())
 
     def _load_catalog(self) -> None:
         """Load the catalog database."""
@@ -147,8 +159,15 @@ class FramingApp(QMainWindow):
         self._sky_widget.view_changed.connect(self._control_panel.update_display)
         self._sky_widget.view_changed.connect(self._status_bar.update_fov)
 
+        # Wire image panel
+        self._image_panel.images_changed.connect(self._on_images_changed)
+
         self._sky_widget.show_initial_view()
         self._altitude_widget.set_target(10.685, 41.269)
+
+        # Render any pre-loaded images from previous session
+        if self._image_panel.images:
+            self._on_images_changed()
 
         self._status_bar.set_status(
             f"Loaded {self._tile_cache.tile_count} sky positions"
@@ -169,10 +188,15 @@ class FramingApp(QMainWindow):
         self._load_cache(path)
 
     def _on_settings(self) -> None:
+        old_cache = self._config.get('cache_path', '')
         dialog = SettingsDialog(self)
         if dialog.exec():
+            self._config = load_config()
             self._observer_config = dialog.get_observer_config()
             self._altitude_widget.update_observer(self._observer_config)
+            new_cache = self._config.get('cache_path', '')
+            if new_cache and new_cache != old_cache:
+                self._load_cache(new_cache)
 
     def _on_sky_atlas(self) -> None:
         """Open the Sky Atlas catalog search dialog."""
@@ -186,6 +210,11 @@ class FramingApp(QMainWindow):
 
         self._catalog_dialog.show()
         self._catalog_dialog.raise_()
+
+    def _on_images_changed(self) -> None:
+        """Handle user image list changes."""
+        if self._sky_widget:
+            self._sky_widget.sky_canvas.set_user_images(self._image_panel.images)
 
     def _on_atlas_target(self, ra: float, dec: float, name: str) -> None:
         """Handle target selected from Sky Atlas."""
