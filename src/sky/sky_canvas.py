@@ -11,7 +11,7 @@ from astropy.wcs import WCS
 from sky.wcs_utils import build_canvas_wcs
 from sky.tile_renderer import TileRenderer
 from sky.tile_cache import TileCache
-from sky.overlays import FovOverlay, MosaicOverlay, CatalogOverlay
+from sky.overlays import FovOverlay, MosaicOverlay, CatalogOverlay, UserImageOverlay
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan, compute_mosaic
 from core.catalog import CatalogSearchEngine
@@ -40,6 +40,8 @@ class SkyCanvas:
         self._fov_overlay = FovOverlay()
         self._mosaic_overlay = MosaicOverlay()
         self._catalog_overlay = CatalogOverlay()
+        self._user_image_overlay = UserImageOverlay()
+        self._user_images: list = []
         self._catalog_engine = None
         self._camera = None
         self._camera_rotation = 0.0
@@ -203,10 +205,33 @@ class SkyCanvas:
         """Set the catalog engine for label overlay."""
         self._catalog_engine = engine
 
+    def set_user_images(self, images: list) -> None:
+        """Set the list of user images for overlay."""
+        self._user_images = images
+        self._redraw_overlays()
+
+    def update_user_image(self, filepath: str, **kwargs) -> None:
+        """Update properties of a single user image."""
+        for img in self._user_images:
+            if str(img.filepath) == filepath:
+                for k, v in kwargs.items():
+                    setattr(img, k, v)
+                break
+        self._redraw_overlays()
+
     def _draw_overlays(self) -> None:
         """Draw all overlays on the current axes."""
         if self._ax is None or self._wcs is None:
             return
+
+        # User images (draw first so FOV/mosaic appear on top)
+        if self._user_images:
+            dpi = self._figure.get_dpi()
+            fig_w, fig_h = self._figure.get_size_inches()
+            canvas_shape = (int(fig_h * dpi), int(fig_w * dpi))
+            self._user_image_overlay.draw(
+                self._ax, self._wcs, self._user_images, canvas_shape,
+            )
 
         # Catalog labels
         if self._catalog_engine is not None:
@@ -237,5 +262,6 @@ class SkyCanvas:
         self._fov_overlay.clear()
         self._mosaic_overlay.clear()
         self._catalog_overlay.clear()
+        self._user_image_overlay.clear()
         self._draw_overlays()
         self._figure.canvas.draw_idle()

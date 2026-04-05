@@ -14,6 +14,7 @@ import astropy.units as u
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan
 from core.catalog import CatalogSearchEngine, CatalogObject
+from core.image_loader import ImageData, downsample_for_display
 
 
 def _compute_fov_corners(
@@ -369,6 +370,126 @@ class CatalogOverlay:
                 )
                 self._artists.append(label)
                 label_boxes.append((lx, ly))
+
+    def clear(self) -> None:
+        for artist in self._artists:
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._artists.clear()
+
+
+class UserImageOverlay:
+    """Draws user image footprints and/or reprojected image data."""
+
+    def __init__(self) -> None:
+        self._artists: list = []
+
+    def draw(
+        self,
+        ax: Axes,
+        canvas_wcs: WCS,
+        images: list[ImageData],
+        canvas_shape: tuple[int, int],
+    ) -> None:
+        """Draw user image overlays."""
+        self.clear()
+
+        for img in images:
+            if not img.visible or img.wcs is None:
+                continue
+            if img.show_full:
+                self._draw_full(ax, canvas_wcs, img, canvas_shape)
+            self._draw_footprint(ax, canvas_wcs, img)
+
+    def _draw_footprint(self, ax: Axes, canvas_wcs: WCS, img: ImageData) -> None:
+        """Draw polygon outline from WCS footprint."""
+        try:
+            sky_corners = img.wcs.calc_footprint()
+        except Exception:
+            return
+
+        px_corners = []
+        for ra, dec in sky_corners:
+            try:
+                coord = SkyCoord(ra, dec, unit='deg')
+                x, y = canvas_wcs.world_to_pixel(coord)
+                px_corners.append([float(x), float(y)])
+            except Exception:
+                return
+
+        if len(px_corners) < 3:
+            return
+
+        # Filled polygon
+        poly = Polygon(
+            px_corners, closed=True,
+            facecolor='#ff8844', edgecolor='#ff8844',
+            alpha=0.06, linewidth=0,
+            transform=ax.transData,
+        )
+        ax.add_patch(poly)
+        self._artists.append(poly)
+
+        # Border
+        closed = px_corners + [px_corners[0]]
+        border = Line2D(
+            [c[0] for c in closed], [c[1] for c in closed],
+            color='#ff8844', alpha=0.7, linewidth=1.5,
+            linestyle='--', transform=ax.transData,
+        )
+        ax.add_line(border)
+        self._artists.append(border)
+
+        # Label at center
+        cx = sum(c[0] for c in px_corners) / len(px_corners)
+        cy = sum(c[1] for c in px_corners) / len(px_corners)
+        label = ax.text(
+            cx, cy, img.label,
+            color='#ff8844', fontsize=8, alpha=0.8,
+            ha='center', va='center',
+            transform=ax.transData,
+        )
+        self._artists.append(label)
+
+    def _draw_full(self, ax: Axes, canvas_wcs: WCS, img: ImageData,
+                   canvas_shape: tuple[int, int]) -> None:
+        """Reproject and display the user image."""
+        from reproject import reproject_interp
+
+        display_data, factor = downsample_for_display(img.data)
+
+        # Build downsampled WCS
+        if factor > 1:
+            ds_wcs = img.wcs.deepcopy()
+            ds_wcs.wcs.crpix = ds_wcs.wcs.crpix / factor
+            if hasattr(ds_wcs.wcs, 'cd') and ds_wcs.wcs.cd is not None:
+                ds_wcs.wcs.cd = ds_wcs.wcs.cd * factor
+            elif hasattr(ds_wcs.wcs, 'cdelt'):
+                ds_wcs.wcs.cdelt = ds_wcs.wcs.cdelt * factor
+        else:
+            ds_wcs = img.wcs
+
+        height, width = canvas_shape
+        rgb_out = np.zeros((height, width, 3), dtype=np.float32)
+
+        for ch in range(min(3, display_data.shape[2])):
+            try:
+                reprojected, _ = reproject_interp(
+                    (display_data[:, :, ch].astype(np.float64), ds_wcs),
+                    canvas_wcs, shape_out=(height, width),
+                )
+                mask = np.isfinite(reprojected)
+                rgb_out[:, :, ch] = np.where(mask, reprojected, 0.0)
+            except Exception:
+                pass
+
+        artist = ax.imshow(
+            rgb_out, origin='lower', alpha=img.opacity,
+            interpolation='bilinear',
+        )
+        self._artists.append(artist)
 
     def clear(self) -> None:
         for artist in self._artists:
