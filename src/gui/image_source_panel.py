@@ -219,9 +219,17 @@ class ImageSourcePanel(QWidget):
         # Load previously saved images
         self._load_saved_images()
 
-        # Auto-select first location if available
+        # Restore last-applied location in combo
+        saved_lat = self._config.get('observer_latitude', 0.0)
+        saved_lon = self._config.get('observer_longitude', 0.0)
+        match_idx = 0
+        for i, loc in enumerate(self._locations):
+            if (abs(loc.get('latitude', 0.0) - saved_lat) < 0.001
+                    and abs(loc.get('longitude', 0.0) - saved_lon) < 0.001):
+                match_idx = i
+                break
         if self._locations:
-            self._loc_combo.setCurrentIndex(0)
+            self._loc_combo.setCurrentIndex(match_idx)
 
     def _save_paths(self) -> None:
         """Save current image paths to config."""
