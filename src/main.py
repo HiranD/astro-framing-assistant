@@ -18,6 +18,11 @@ def run_app() -> None:
     from gui.app import FramingApp
 
     app = QApplication(sys.argv)
+
+    # Force C locale so decimal separator is always "." (not ",")
+    from PyQt6.QtCore import QLocale
+    QLocale.setDefault(QLocale(QLocale.Language.C))
+
     app.setApplicationName("Astro Framing Assistant")
     app.setOrganizationName("AstroFraming")
     qdarktheme.setup_theme('dark')
