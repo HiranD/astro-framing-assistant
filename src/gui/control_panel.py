@@ -43,6 +43,7 @@ class ControlPanel(QWidget):
     fov_changed = pyqtSignal(float)
     camera_changed = pyqtSignal(object)      # CameraProfile
     rotation_changed = pyqtSignal(float)
+    fov_visible_changed = pyqtSignal(bool)
 
     def __init__(self, config: dict = None, parent=None) -> None:
         super().__init__(parent)
@@ -157,6 +158,10 @@ class ControlPanel(QWidget):
 
         # --- Camera ---
         cam_group = QGroupBox("Camera")
+        cam_group.setCheckable(True)
+        cam_group.setChecked(True)
+        cam_group.toggled.connect(self.fov_visible_changed.emit)
+        self._cam_group = cam_group
         cam_layout = QFormLayout(cam_group)
 
         # Profile selector — full width dropdown
@@ -302,6 +307,7 @@ class ControlPanel(QWidget):
         self._pixel_size_spin.setValue(config.get('last_pixel_size', DEFAULT_PROFILE.pixel_size_um))
         self._focal_spin.setValue(config.get('last_focal_length', DEFAULT_PROFILE.focal_length_mm))
         self._rotation_spin.setValue(config.get('last_rotation', 0.0))
+        self._cam_group.setChecked(config.get('last_show_fov', True))
         # FOV
         self._fov_spin.setValue(config.get('last_fov', 3.0))
         self._fov_step_combo.setCurrentIndex(config.get('last_fov_step', 2))
@@ -322,6 +328,7 @@ class ControlPanel(QWidget):
         config['last_pixel_size'] = self._pixel_size_spin.value()
         config['last_focal_length'] = self._focal_spin.value()
         config['last_rotation'] = self._rotation_spin.value()
+        config['last_show_fov'] = self._cam_group.isChecked()
 
     def _build_camera(self) -> CameraProfile:
         """Build a CameraProfile from current spinbox values."""

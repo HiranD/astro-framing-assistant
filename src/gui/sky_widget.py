@@ -73,6 +73,10 @@ class SkyWidget(QWidget):
         """Update the camera rotation for FOV overlay."""
         self._sky_canvas.set_camera_rotation(rotation_deg)
 
+    def set_fov_visible(self, visible: bool) -> None:
+        """Show or hide the camera FOV overlay."""
+        self._sky_canvas.set_fov_visible(visible)
+
     def set_mosaic(self, h_panels: int, v_panels: int, overlap_pct: float) -> None:
         """Update mosaic parameters."""
         self._sky_canvas.set_mosaic(h_panels, v_panels, overlap_pct)

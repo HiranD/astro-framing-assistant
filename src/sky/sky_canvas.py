@@ -54,6 +54,7 @@ class SkyCanvas(QObject):
         self._catalog_engine = None
         self._camera = None
         self._camera_rotation = 0.0
+        self._show_fov = True
         self._h_panels = 1
         self._v_panels = 1
         self._overlap_pct = 10.0
@@ -287,6 +288,11 @@ class SkyCanvas(QObject):
         self._recompute_mosaic()
         self._redraw_overlays()
 
+    def set_fov_visible(self, visible: bool) -> None:
+        """Show or hide the camera FOV overlay."""
+        self._show_fov = visible
+        self._redraw_overlays()
+
     def set_mosaic(self, h_panels: int, v_panels: int, overlap_pct: float) -> None:
         """Set mosaic parameters and redraw overlay."""
         self._h_panels = max(1, h_panels)
@@ -350,7 +356,7 @@ class SkyCanvas(QObject):
                 self._catalog_engine, self._ra_deg, self._dec_deg,
             )
 
-        if self._camera is None:
+        if self._camera is None or not self._show_fov:
             return
 
         is_mosaic = self._h_panels > 1 or self._v_panels > 1
