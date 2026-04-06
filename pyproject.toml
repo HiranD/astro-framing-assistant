@@ -14,5 +14,6 @@ dependencies = [
     "pyqt6>=6.11.0",
     "pyqtdarktheme>=2.1.0",
     "reproject>=0.14.1",
+    "timezonefinder>=8.2.0",
     "xisf>=0.9.5",
 ]
