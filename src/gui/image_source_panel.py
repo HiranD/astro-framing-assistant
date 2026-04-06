@@ -377,6 +377,24 @@ class ImageSourcePanel(QWidget):
     def _on_today(self) -> None:
         self._date_edit.setDate(QDate.currentDate())
 
+    def restore_state(self, config: dict) -> None:
+        """Restore mosaic state from config."""
+        self._h_panels_spin.blockSignals(True)
+        self._v_panels_spin.blockSignals(True)
+        self._overlap_spin.blockSignals(True)
+        self._h_panels_spin.setValue(config.get('last_mosaic_h', 1))
+        self._v_panels_spin.setValue(config.get('last_mosaic_v', 1))
+        self._overlap_spin.setValue(config.get('last_mosaic_overlap', 10.0))
+        self._h_panels_spin.blockSignals(False)
+        self._v_panels_spin.blockSignals(False)
+        self._overlap_spin.blockSignals(False)
+
+    def save_state(self, config: dict) -> None:
+        """Save mosaic state to config dict."""
+        config['last_mosaic_h'] = self._h_panels_spin.value()
+        config['last_mosaic_v'] = self._v_panels_spin.value()
+        config['last_mosaic_overlap'] = self._overlap_spin.value()
+
     # --- Mosaic methods ---
 
     def _on_mosaic_changed(self) -> None:

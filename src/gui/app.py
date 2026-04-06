@@ -208,8 +208,21 @@ class FramingApp(QMainWindow):
         self._image_panel.location_changed.connect(self._on_location_changed)
         self._image_panel.date_changed.connect(self._altitude_widget.set_date)
 
-        self._sky_widget.show_initial_view()
-        self._altitude_widget.set_target(10.685, 41.269)
+        # Restore last session state
+        ra = self._config.get('last_target_ra', 10.685)
+        dec = self._config.get('last_target_dec', 41.269)
+        fov = self._config.get('last_fov', 3.0)
+        rotation = self._config.get('last_rotation', 0.0)
+        self._control_panel.restore_state(self._config)
+        self._image_panel.restore_state(self._config)
+        camera = self._control_panel._build_camera()
+        self._sky_widget.show_initial_view(ra, dec, fov, camera, rotation)
+        self._sky_widget.set_mosaic(
+            self._config.get('last_mosaic_h', 1),
+            self._config.get('last_mosaic_v', 1),
+            self._config.get('last_mosaic_overlap', 10.0),
+        )
+        self._altitude_widget.set_target(ra, dec)
 
         # Render any pre-loaded images from previous session
         if self._image_panel.images:
@@ -277,5 +290,8 @@ class FramingApp(QMainWindow):
             self._sky_widget.sky_canvas.shutdown()
         self._config['window_geometry'] = self.saveGeometry().toBase64().data().decode()
         self._config.pop('window_state', None)
+        # Save session state
+        self._control_panel.save_state(self._config)
+        self._image_panel.save_state(self._config)
         save_config(self._config)
         super().closeEvent(event)

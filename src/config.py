@@ -101,6 +101,20 @@ def _build_defaults() -> dict[str, Any]:
         'observer_longitude': lon,
         'observer_elevation': 0.0,
         'observer_timezone': tz,
+        # Last session state
+        'last_target_name': 'M 31',
+        'last_target_ra': 10.685,
+        'last_target_dec': 41.269,
+        'last_fov': 3.0,
+        'last_fov_step': 2,
+        'last_sensor_width': 6248,
+        'last_sensor_height': 4176,
+        'last_pixel_size': 3.76,
+        'last_focal_length': 550.0,
+        'last_rotation': 0.0,
+        'last_mosaic_h': 1,
+        'last_mosaic_v': 1,
+        'last_mosaic_overlap': 10.0,
     }
 
 

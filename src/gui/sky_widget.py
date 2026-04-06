@@ -47,10 +47,12 @@ class SkyWidget(QWidget):
         self._mpl_canvas.mpl_connect('button_release_event', self._on_release)
         self._mpl_canvas.mpl_connect('motion_notify_event', self._on_motion)
 
-    def show_initial_view(self) -> None:
-        """Render the initial view centered on M31."""
-        self._sky_canvas.set_view(ra_deg=10.685, dec_deg=41.269, fov_deg=3.0)
-        self._sky_canvas.set_camera(DEFAULT_PROFILE, 0.0)
+    def show_initial_view(self, ra_deg: float = 10.685, dec_deg: float = 41.269,
+                          fov_deg: float = 3.0, camera: CameraProfile = None,
+                          rotation: float = 0.0) -> None:
+        """Render the initial view."""
+        self._sky_canvas.set_view(ra_deg=ra_deg, dec_deg=dec_deg, fov_deg=fov_deg)
+        self._sky_canvas.set_camera(camera or DEFAULT_PROFILE, rotation)
         self._emit_view_changed()
 
     def set_center(self, ra_deg: float, dec_deg: float) -> None:

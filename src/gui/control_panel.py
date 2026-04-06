@@ -272,6 +272,45 @@ class ControlPanel(QWidget):
         # Initial FOV label update
         self._update_fov_labels()
 
+    def restore_state(self, config: dict) -> None:
+        """Restore UI state from config (called on startup)."""
+        self._updating = True
+        # Target
+        name = config.get('last_target_name', '')
+        ra = config.get('last_target_ra')
+        dec = config.get('last_target_dec')
+        if name:
+            self._name_edit.setText(name)
+        if ra is not None and dec is not None:
+            self._ra_edit.setText(format_ra(ra))
+            self._dec_edit.setText(format_dec(dec))
+            self._last_resolved = {'name': name, 'ra': ra, 'dec': dec}
+        # Camera
+        self._width_spin.setValue(config.get('last_sensor_width', DEFAULT_PROFILE.sensor_width_px))
+        self._height_spin.setValue(config.get('last_sensor_height', DEFAULT_PROFILE.sensor_height_px))
+        self._pixel_size_spin.setValue(config.get('last_pixel_size', DEFAULT_PROFILE.pixel_size_um))
+        self._focal_spin.setValue(config.get('last_focal_length', DEFAULT_PROFILE.focal_length_mm))
+        self._rotation_spin.setValue(config.get('last_rotation', 0.0))
+        # FOV
+        self._fov_spin.setValue(config.get('last_fov', 3.0))
+        self._fov_step_combo.setCurrentIndex(config.get('last_fov_step', 2))
+        self._update_fov_labels()
+        self._updating = False
+
+    def save_state(self, config: dict) -> None:
+        """Save current UI state to config dict."""
+        config['last_target_name'] = self._name_edit.text()
+        if self._last_resolved:
+            config['last_target_ra'] = self._last_resolved['ra']
+            config['last_target_dec'] = self._last_resolved['dec']
+        config['last_fov'] = self._fov_spin.value()
+        config['last_fov_step'] = self._fov_step_combo.currentIndex()
+        config['last_sensor_width'] = self._width_spin.value()
+        config['last_sensor_height'] = self._height_spin.value()
+        config['last_pixel_size'] = self._pixel_size_spin.value()
+        config['last_focal_length'] = self._focal_spin.value()
+        config['last_rotation'] = self._rotation_spin.value()
+
     def _build_camera(self) -> CameraProfile:
         """Build a CameraProfile from current spinbox values."""
         return CameraProfile(
