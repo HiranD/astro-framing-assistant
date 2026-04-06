@@ -97,8 +97,6 @@ def _build_defaults() -> dict[str, Any]:
     lat, lon = _detect_coords_from_timezone(tz)
     return {
         'cache_path': None,
-        'window_width': 1400,
-        'window_height': 900,
         'observer_latitude': lat,
         'observer_longitude': lon,
         'observer_elevation': 0.0,
