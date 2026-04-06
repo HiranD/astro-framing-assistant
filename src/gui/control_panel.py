@@ -82,15 +82,23 @@ class ControlPanel(QWidget):
         self._suggest_timer.timeout.connect(self._on_suggest)
         self._name_edit.textChanged.connect(self._on_suggest_text_changed)
 
+        name_row.addWidget(self._name_edit)
+        search_layout.addLayout(name_row)
+
+        btn_row = QHBoxLayout()
         self._search_btn = QPushButton("Go")
         self._search_btn.setToolTip("Search for object and navigate to it")
         self._search_btn.clicked.connect(self._on_search)
-        name_row.addWidget(self._name_edit)
-        name_row.addWidget(self._search_btn)
-        search_layout.addLayout(name_row)
+        btn_row.addWidget(self._search_btn)
+        bookmark_btn = QPushButton("\u2606 Bookmark")
+        bookmark_btn.setToolTip("Bookmark the current target")
+        bookmark_btn.clicked.connect(self._on_bookmark)
+        btn_row.addWidget(bookmark_btn)
+        search_layout.addLayout(btn_row)
 
         self._search_status = QLabel("")
         self._search_status.setStyleSheet("color: gray; font-size: 11px;")
+        self._search_status.setContentsMargins(0, 0, 0, 0)
         search_layout.addWidget(self._search_status)
 
         # Recent targets
@@ -110,12 +118,6 @@ class ControlPanel(QWidget):
         self._bookmark_combo.setToolTip("Saved target bookmarks")
         self._bookmark_combo.activated.connect(self._on_bookmark_selected)
         bookmark_row.addWidget(self._bookmark_combo, 1)
-
-        bookmark_btn = QPushButton("\u2606")
-        bookmark_btn.setFixedWidth(30)
-        bookmark_btn.setToolTip("Bookmark the current target")
-        bookmark_btn.clicked.connect(self._on_bookmark)
-        bookmark_row.addWidget(bookmark_btn)
 
         remove_bookmark_btn = QPushButton("\u2715")
         remove_bookmark_btn.setFixedWidth(30)
@@ -459,15 +461,28 @@ class ControlPanel(QWidget):
     # --- Bookmarks ---
 
     def _on_bookmark(self) -> None:
-        """Bookmark the current target."""
-        if self._last_resolved is None:
-            self._search_status.setText("Navigate to a target first")
-            self._search_status.setStyleSheet("color: #ff8844; font-size: 11px;")
-            return
-        name = self._last_resolved['name']
+        """Bookmark the current target or coordinates."""
+        if self._last_resolved:
+            name = self._last_resolved['name']
+            entry = self._last_resolved.copy()
+        else:
+            # Try to bookmark from coordinate fields
+            try:
+                ra = parse_ra(self._ra_edit.text())
+                dec = parse_dec(self._dec_edit.text())
+            except ValueError:
+                self._search_status.setText("Navigate to a target first")
+                self._search_status.setStyleSheet("color: #ff8844; font-size: 11px;")
+                return
+            name, ok = QInputDialog.getText(
+                self, "Bookmark Name", "Enter a name for this bookmark:")
+            if not ok or not name.strip():
+                return
+            name = name.strip()
+            entry = {'name': name, 'ra': ra, 'dec': dec}
         # Dedup by name
         self._bookmarks = [b for b in self._bookmarks if b['name'] != name]
-        self._bookmarks.insert(0, self._last_resolved.copy())
+        self._bookmarks.insert(0, entry)
 
         self._bookmark_combo.clear()
         for b in self._bookmarks:
