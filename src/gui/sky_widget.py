@@ -1,8 +1,7 @@
 """Sky widget — PyQt6 wrapper around the matplotlib sky canvas with mouse interaction."""
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QCursor
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from sky.sky_canvas import SkyCanvas
@@ -29,13 +28,21 @@ class SkyWidget(QWidget):
 
         # Pan state
         self._dragging = False
-        self._drag_start_x = 0.0
-        self._drag_start_y = 0.0
+        self._drag_screen_x = 0.0
+        self._drag_screen_y = 0.0
         self._drag_start_ra = 0.0
         self._drag_start_dec = 0.0
+        self._pan_scales = None  # (sx, sy) screen→data pixel ratios
+        self._pending_ra = None
+        self._pending_dec = None
+
+        # Re-render on resize (debounced)
+        self._resize_timer = QTimer()
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.setInterval(300)
+        self._resize_timer.timeout.connect(self._on_resize_done)
 
         # Connect matplotlib mouse events
-        self._mpl_canvas.mpl_connect('scroll_event', self._on_scroll)
         self._mpl_canvas.mpl_connect('button_press_event', self._on_press)
         self._mpl_canvas.mpl_connect('button_release_event', self._on_release)
         self._mpl_canvas.mpl_connect('motion_notify_event', self._on_motion)
@@ -72,70 +79,66 @@ class SkyWidget(QWidget):
     def sky_canvas(self) -> SkyCanvas:
         return self._sky_canvas
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._resize_timer.start()
+
+    def _on_resize_done(self) -> None:
+        """Re-render after resize settles."""
+        self._sky_canvas._request_render()
+
     def _emit_view_changed(self) -> None:
         sc = self._sky_canvas
         self.view_changed.emit(sc.ra_deg, sc.dec_deg, sc.fov_deg)
-
-    def _on_scroll(self, event) -> None:
-        """Handle mouse wheel zoom."""
-        if event.step > 0:
-            factor = 1.0 / 1.3  # zoom in
-        else:
-            factor = 1.3  # zoom out
-
-        new_fov = self._sky_canvas.fov_deg * factor
-        new_fov = max(0.1, min(20.0, new_fov))
-        self._sky_canvas.set_fov(new_fov)
-        self._emit_view_changed()
 
     def _on_press(self, event) -> None:
         """Handle mouse press — start pan."""
         if event.button != 1 or event.inaxes is None:
             return
         self._dragging = True
-        self._drag_start_x = event.xdata
-        self._drag_start_y = event.ydata
+        self._drag_screen_x = event.x
+        self._drag_screen_y = event.y
         self._drag_start_ra = self._sky_canvas.ra_deg
         self._drag_start_dec = self._sky_canvas.dec_deg
+        self._pan_scales = self._sky_canvas.start_pan()
 
     def _on_release(self, event) -> None:
-        """Handle mouse release — end pan, re-render."""
+        """Handle mouse release — full re-render at final position."""
         if not self._dragging:
             return
         self._dragging = False
         if event.button != 1:
             return
-        # Final render is already done during drag via set_center
+        if self._pending_ra is not None:
+            self._sky_canvas.set_center(self._pending_ra, self._pending_dec)
+            self._emit_view_changed()
+            self._pending_ra = None
+            self._pending_dec = None
 
     def _on_motion(self, event) -> None:
         """Handle mouse move — pan or cursor tracking."""
-        if event.inaxes is None:
-            return
+        if self._dragging and self._pan_scales is not None:
+            # Total screen-pixel offset from drag start
+            dx = event.x - self._drag_screen_x
+            dy = event.y - self._drag_screen_y
+            sx, sy = self._pan_scales
 
-        if self._dragging and self._drag_start_x is not None:
-            # Compute pixel offset and convert to sky offset
-            dx = event.xdata - self._drag_start_x
-            dy = event.ydata - self._drag_start_y
+            # Instant visual shift (FOV counter-shifted to stay centered)
+            self._sky_canvas.pan_by_screen(dx, dy, sx, sy)
 
+            # Compute new center from shifted view limits
             wcs = self._sky_canvas.wcs
             if wcs is not None:
-                # Pixel scale from CD matrix (deg/pixel)
-                pixel_scale = abs(wcs.wcs.cd[0][0])
-                dra = -dx * pixel_scale  # RA increases left
-                ddec = -dy * pixel_scale
-
-                new_ra = (self._drag_start_ra + dra) % 360.0
-                new_dec = max(-90.0, min(90.0, self._drag_start_dec + ddec))
-
-                self._sky_canvas.set_center(new_ra, new_dec)
-                self._emit_view_changed()
-
-                # Reset drag start for incremental panning
-                self._drag_start_x = event.xdata
-                self._drag_start_y = event.ydata
-                self._drag_start_ra = self._sky_canvas.ra_deg
-                self._drag_start_dec = self._sky_canvas.dec_deg
-        else:
+                dx_data = dx * sx
+                dy_data = dy * sy
+                xlim = self._sky_canvas._ax.get_xlim()
+                ylim = self._sky_canvas._ax.get_ylim()
+                cx = (xlim[0] + xlim[1]) / 2
+                cy = (ylim[0] + ylim[1]) / 2
+                result = wcs.pixel_to_world(cx, cy)
+                self._pending_ra = result.ra.deg
+                self._pending_dec = result.dec.deg
+        elif event.inaxes is not None:
             # Cursor tracking — emit RA/Dec under mouse
             result = self._sky_canvas.pixel_to_world(event.xdata, event.ydata)
             if result:
