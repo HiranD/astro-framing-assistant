@@ -7,7 +7,7 @@ from typing import Optional
 
 import numpy as np
 import pytz
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_sun
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_sun, get_body
 from astropy.time import Time
 import astropy.units as u
 from astroplan import Observer, FixedTarget
@@ -154,6 +154,28 @@ class VisibilityCalculator:
         sun_altaz = get_sun(times).transform_to(altaz_frame)
 
         return list(times), list(sun_altaz.alt.deg)
+
+    def compute_moon_altitudes(self, obs_date: date = None) -> tuple[list, list, float]:
+        """Compute moon altitude curve and illumination.
+
+        Returns:
+            (times, moon_altitudes, illumination) tuple.
+            illumination is a fraction 0-1 at midnight.
+        """
+        if obs_date is None:
+            obs_date = date.today()
+
+        local_noon = self._local_noon_utc(obs_date)
+        times = local_noon + np.linspace(0, 24, 288) * u.hour
+
+        altaz_frame = AltAz(obstime=times, location=self._location)
+        moon_altaz = get_body('moon', times).transform_to(altaz_frame)
+
+        # Moon illumination at local midnight
+        midnight = local_noon + 12 * u.hour
+        illumination = float(self._observer.moon_illumination(midnight))
+
+        return list(times), list(moon_altaz.alt.deg), illumination
 
     @property
     def timezone(self) -> str:
