@@ -26,13 +26,14 @@ class CatalogDialog(QDialog):
         self.setMinimumSize(800, 500)
         self._engine = catalog_engine
         self._results: list[CatalogObject] = []
+        self._matched_names: dict[int, str] = {}  # obj.id → matched alias
 
         layout = QVBoxLayout(self)
 
         # Search bar
         search_row = QHBoxLayout()
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Search by name (e.g. M31, NGC 7000, Crab Nebula)")
+        self._search_edit.setPlaceholderText("Search by name (e.g. M31, NGC 7000, Crab Nebula, RCW 16)")
         search_btn = QPushButton("Search")
         search_btn.clicked.connect(self._on_search)
         self._search_edit.returnPressed.connect(self._on_search)
@@ -115,13 +116,21 @@ class CatalogDialog(QDialog):
         self._filter_timer.timeout.connect(self._apply_filters)
 
     def _on_search(self) -> None:
-        """Run name search."""
+        """Run name search with live results."""
         query = self._search_edit.text().strip()
         if not query:
+            self._results = []
+            self._matched_names.clear()
+            self._populate_table(self._results)
             return
 
         results = self._engine.search_by_name(query, max_results=50)
-        self._results = [obj for obj, score in results]
+        self._results = []
+        self._matched_names.clear()
+        for obj, score, match_key in results:
+            self._results.append(obj)
+            if match_key.lower() != obj.name.lower():
+                self._matched_names[obj.id] = match_key
         self._populate_table(self._results)
 
     def _on_filter_changed(self) -> None:
@@ -178,7 +187,10 @@ class CatalogDialog(QDialog):
         self._table.setRowCount(len(objects))
 
         for i, obj in enumerate(objects):
-            self._table.setItem(i, 0, QTableWidgetItem(obj.name))
+            # Show matched alias if different from primary name
+            alias = self._matched_names.get(obj.id)
+            name_text = f"{alias.upper()} ({obj.name})" if alias else obj.name
+            self._table.setItem(i, 0, QTableWidgetItem(name_text))
             self._table.setItem(i, 1, QTableWidgetItem(obj.object_type))
             self._table.setItem(i, 2, QTableWidgetItem(format_ra(obj.ra_deg)))
             self._table.setItem(i, 3, QTableWidgetItem(format_dec(obj.dec_deg)))

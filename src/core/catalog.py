@@ -110,22 +110,25 @@ class CatalogSearchEngine:
         logger.info("Catalog index built: %d objects, %d name keys",
                      len(self._objects), len(self._sorted_keys))
 
-    def search_by_name(self, query: str, max_results: int = 15) -> list[tuple[CatalogObject, int]]:
+    def search_by_name(self, query: str, max_results: int = 15) -> list[tuple[CatalogObject, int, str]]:
         """Search for objects by name using 5-stage ranked pipeline.
 
-        Returns list of (CatalogObject, score) tuples, sorted by score descending.
+        Returns list of (CatalogObject, score, matched_name) tuples,
+        sorted by score descending. matched_name is the alias/key that matched.
         """
         query = query.strip()
         if not query:
             return []
 
         results: dict[int, int] = {}  # object_id → best score
+        matched: dict[int, str] = {}  # object_id → matched name key
 
         # Stage 1: Exact lookup
         key = query.lower()
         if key in self._name_to_id:
             oid = self._name_to_id[key]
             results[oid] = 1000 + self._bonus(oid)
+            matched[oid] = key
 
         # Stage 2: Catalog pattern
         for pattern, catalog_name in _CATALOG_PATTERNS:
@@ -138,6 +141,7 @@ class CatalogSearchEngine:
                     score = 900 + self._bonus(oid)
                     if oid not in results or score > results[oid]:
                         results[oid] = score
+                        matched[oid] = key
                 break
 
         # Stage 2b: Pure number → try NGC then Messier
@@ -149,8 +153,9 @@ class CatalogSearchEngine:
                     score = base_score + self._bonus(oid)
                     if oid not in results or score > results[oid]:
                         results[oid] = score
+                        matched[oid] = key
 
-        # Stage 3: Prefix search
+        # Stage 3: Prefix search — closer matches (shorter names) rank higher
         if len(results) < max_results:
             idx = bisect.bisect_left(self._sorted_keys, key)
             count = 0
@@ -159,9 +164,13 @@ class CatalogSearchEngine:
                 if not k.startswith(key):
                     break
                 oid = self._name_to_id[k]
-                score = 800 + self._bonus(oid)
+                # Bonus for closer match: exact length match gets +50,
+                # longer names get progressively less
+                closeness = max(0, 50 - (len(k) - len(key)) * 10)
+                score = 800 + closeness + self._bonus(oid)
                 if oid not in results or score > results[oid]:
                     results[oid] = score
+                    matched[oid] = k
                 idx += 1
                 count += 1
 
@@ -173,15 +182,17 @@ class CatalogSearchEngine:
                     break
                 if key in k:
                     oid = self._name_to_id[k]
-                    score = 600 + self._bonus(oid)
+                    closeness = max(0, 30 - (len(k) - len(key)) * 5)
+                    score = 600 + closeness + self._bonus(oid)
                     if oid not in results or score > results[oid]:
                         results[oid] = score
+                        matched[oid] = k
                     count += 1
 
         # Sort by score, return top results
         sorted_results = sorted(results.items(), key=lambda x: x[1], reverse=True)
         return [
-            (self._objects[oid], score)
+            (self._objects[oid], score, matched.get(oid, self._objects[oid].name))
             for oid, score in sorted_results[:max_results]
             if oid in self._objects
         ]
@@ -192,10 +203,15 @@ class CatalogSearchEngine:
         if not obj:
             return 0
         bonus = 0
-        if obj.catalog in ('Messier', 'NGC', 'IC'):
+        # All catalog objects get a base bonus; popular catalogs get more
+        if obj.catalog in ('Messier',):
             bonus += 100
-        if obj.catalog in ('Sharpless', 'Caldwell'):
-            bonus += 50
+        elif obj.catalog in ('NGC', 'IC', 'Caldwell'):
+            bonus += 80
+        elif obj.catalog in ('Sharpless', 'RCW', 'Gum', 'Barnard'):
+            bonus += 60
+        elif obj.catalog:
+            bonus += 40
         if obj.magnitude is not None:
             bonus += 20
             if obj.magnitude < 10:

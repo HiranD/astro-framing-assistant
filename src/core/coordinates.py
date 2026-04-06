@@ -29,7 +29,7 @@ def resolve_name(name: str, catalog_engine=None) -> SkyCoord:
     if catalog_engine is not None:
         results = catalog_engine.search_by_name(name, max_results=1)
         if results:
-            obj, score = results[0]
+            obj, score, _match = results[0]
             return SkyCoord(obj.ra_deg, obj.dec_deg, unit='deg')
 
     # Fallback to online resolution
