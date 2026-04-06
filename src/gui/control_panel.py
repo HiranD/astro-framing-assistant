@@ -280,12 +280,21 @@ class ControlPanel(QWidget):
         ra = config.get('last_target_ra')
         dec = config.get('last_target_dec')
         if name:
+            self._name_edit.blockSignals(True)
             self._name_edit.setText(name)
+            self._name_edit.blockSignals(False)
         if ra is not None and dec is not None:
             self._ra_edit.setText(format_ra(ra))
             self._dec_edit.setText(format_dec(dec))
             self._last_resolved = {'name': name, 'ra': ra, 'dec': dec}
-        # Camera
+        # Camera — select matching profile first, then set values
+        profile_name = config.get('last_camera_profile', '')
+        if profile_name:
+            idx = self._profile_combo.findText(profile_name)
+            if idx >= 0:
+                self._profile_combo.blockSignals(True)
+                self._profile_combo.setCurrentIndex(idx)
+                self._profile_combo.blockSignals(False)
         self._width_spin.setValue(config.get('last_sensor_width', DEFAULT_PROFILE.sensor_width_px))
         self._height_spin.setValue(config.get('last_sensor_height', DEFAULT_PROFILE.sensor_height_px))
         self._pixel_size_spin.setValue(config.get('last_pixel_size', DEFAULT_PROFILE.pixel_size_um))
@@ -299,10 +308,11 @@ class ControlPanel(QWidget):
 
     def save_state(self, config: dict) -> None:
         """Save current UI state to config dict."""
-        config['last_target_name'] = self._name_edit.text()
         if self._last_resolved:
+            config['last_target_name'] = self._last_resolved['name']
             config['last_target_ra'] = self._last_resolved['ra']
             config['last_target_dec'] = self._last_resolved['dec']
+        config['last_camera_profile'] = self._profile_combo.currentText()
         config['last_fov'] = self._fov_spin.value()
         config['last_fov_step'] = self._fov_step_combo.currentIndex()
         config['last_sensor_width'] = self._width_spin.value()
