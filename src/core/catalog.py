@@ -88,8 +88,8 @@ class CatalogSearchEngine:
             )
             self._objects[obj.id] = obj
 
-            # Index by name
-            key = obj.name.lower()
+            # Index by name (normalize whitespace)
+            key = ' '.join(obj.name.lower().split())
             self._name_to_id[key] = obj.id
             if obj.catalog and obj.catalog_number:
                 cat = obj.catalog.lower()
@@ -100,7 +100,7 @@ class CatalogSearchEngine:
         # Load aliases
         cursor.execute("SELECT object_id, alias_name FROM object_aliases")
         for row in cursor.fetchall():
-            key = row['alias_name'].lower()
+            key = ' '.join(row['alias_name'].lower().split())
             if key not in self._name_to_id and row['object_id'] in self._objects:
                 self._name_to_id[key] = row['object_id']
 
@@ -116,7 +116,7 @@ class CatalogSearchEngine:
         Returns list of (CatalogObject, score, matched_name) tuples,
         sorted by score descending. matched_name is the alias/key that matched.
         """
-        query = query.strip()
+        query = ' '.join(query.split())
         if not query:
             return []
 
