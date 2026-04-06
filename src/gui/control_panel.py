@@ -452,11 +452,14 @@ class ControlPanel(QWidget):
         """Navigate to a recent target."""
         if 0 <= index < len(self._recent_targets):
             t = self._recent_targets[index]
+            self._name_edit.blockSignals(True)
             self._name_edit.setText(t['name'])
+            self._name_edit.blockSignals(False)
             self._last_resolved = t.copy()
             self._search_status.setText(f"{t['name']} found")
             self._search_status.setStyleSheet("color: lightgreen; font-size: 11px;")
             self.target_changed.emit(t['ra'], t['dec'])
+            self._recent_combo.setCurrentIndex(-1)
 
     # --- Bookmarks ---
 
@@ -525,11 +528,14 @@ class ControlPanel(QWidget):
         """Navigate to a bookmarked target."""
         if 0 <= index < len(self._bookmarks):
             t = self._bookmarks[index]
+            self._name_edit.blockSignals(True)
             self._name_edit.setText(t['name'])
+            self._name_edit.blockSignals(False)
             self._last_resolved = t.copy()
             self._search_status.setText(f"{t['name']} found")
             self._search_status.setStyleSheet("color: lightgreen; font-size: 11px;")
             self.target_changed.emit(t['ra'], t['dec'])
+            self._bookmark_combo.setCurrentIndex(-1)
 
     _default_tooltips: dict = {}
 
