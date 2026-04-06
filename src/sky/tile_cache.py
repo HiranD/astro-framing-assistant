@@ -11,6 +11,7 @@ import os
 import re
 import math
 import logging
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -56,7 +57,13 @@ class TileCache:
         self.cache_path = Path(cache_path)
         # Index: (ra_deg, dec_deg) -> {size_px: TileInfo}
         self._index: dict[tuple[float, float], dict[int, TileInfo]] = {}
+        self._valid = False
         self._build_index()
+
+    @property
+    def valid(self) -> bool:
+        """Whether the cache path exists and contains tiles."""
+        return self._valid
 
     def _build_index(self) -> None:
         """Scan directory and parse all tile filenames into the index."""
@@ -77,6 +84,7 @@ class TileCache:
             self._index[key][info.size_px] = info
             count += 1
 
+        self._valid = len(self._index) > 0
         logger.info("Indexed %d tile files at %d sky positions", count, len(self._index))
 
     def _parse_filename(self, name: str, filepath: Path) -> Optional[TileInfo]:
@@ -156,43 +164,35 @@ class TileCache:
         return results
 
     def load_tile(self, tile: TileInfo) -> np.ndarray:
-        """Load a tile JPEG as a numpy array.
+        """Load a tile JPEG as a numpy array (LRU cached)."""
+        return TileCache._load_tile_cached(str(tile.filepath))
 
-        The image is flipped vertically so that row 0 is the bottom (Dec min),
-        matching the WCS convention where y increases with Dec.
-
-        Returns:
-            RGB numpy array with shape (H, W, 3), dtype uint8.
-        """
-        img = Image.open(tile.filepath)
+    @staticmethod
+    @functools.lru_cache(maxsize=48)
+    def _load_tile_cached(filepath: str) -> np.ndarray:
+        """Cached tile loader — avoids re-reading JPEGs from disk."""
+        img = Image.open(filepath)
         if img.mode != 'RGB':
             img = img.convert('RGB')
         return np.flipud(np.array(img))
 
     def build_tile_wcs(self, tile: TileInfo) -> WCS:
-        """Build a WCS for a tile using plate carree (CAR) projection.
+        """Build a WCS for a tile (LRU cached)."""
+        return TileCache._build_tile_wcs_cached(
+            tile.ra_deg, tile.dec_deg, tile.size_px
+        )
 
-        N.I.N.A. tiles use plate carree with RA scaled by 1/cos(dec),
-        so each tile covers 5° in Dec but 5°/cos(dec) in RA.
-
-        Args:
-            tile: The tile to build WCS for.
-
-        Returns:
-            An astropy WCS describing the tile's sky coverage.
-        """
+    @staticmethod
+    @functools.lru_cache(maxsize=256)
+    def _build_tile_wcs_cached(ra_deg: float, dec_deg: float, size_px: int) -> WCS:
+        """Cached WCS builder for tiles."""
         w = WCS(naxis=2)
-        w.wcs.crpix = [tile.size_px / 2.0 + 0.5, tile.size_px / 2.0 + 0.5]
-        w.wcs.crval = [tile.ra_deg, tile.dec_deg]
+        w.wcs.crpix = [size_px / 2.0 + 0.5, size_px / 2.0 + 0.5]
+        w.wcs.crval = [ra_deg, dec_deg]
         w.wcs.ctype = ['RA---STG', 'DEC--STG']
-
-        # N.I.N.A. uses Stereographic (STG) projection via hips2fits
-        # FOV is the full tile coverage, pixel scale = FOV / size
-        pixel_scale = TILE_FOV_DEG / tile.size_px
-
+        pixel_scale = TILE_FOV_DEG / size_px
         w.wcs.cd = [
             [-pixel_scale, 0.0],
             [0.0, pixel_scale],
         ]
-
         return w

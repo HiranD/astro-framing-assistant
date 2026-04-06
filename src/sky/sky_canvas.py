@@ -6,11 +6,15 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend; PyQt provides the display
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
 from astropy.wcs import WCS
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from sky.wcs_utils import build_canvas_wcs
 from sky.tile_renderer import TileRenderer
 from sky.tile_cache import TileCache
+from sky.render_worker import RenderWorker
 from sky.overlays import FovOverlay, MosaicOverlay, CatalogOverlay, UserImageOverlay
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan, compute_mosaic
@@ -19,13 +23,18 @@ from core.catalog import CatalogSearchEngine
 logger = logging.getLogger(__name__)
 
 
-class SkyCanvas:
+class SkyCanvas(QObject):
     """Manages a matplotlib Figure with WCS-aware axes for sky display."""
 
+    rendering_started = pyqtSignal()
+    rendering_finished = pyqtSignal()
+
     def __init__(self, tile_cache: TileCache) -> None:
+        super().__init__()
         self._tile_cache = tile_cache
         self._renderer = TileRenderer(tile_cache)
-        self._figure = Figure(facecolor='black', tight_layout=True)
+        self._figure = Figure(facecolor='black')
+        self._figure.subplots_adjust(left=0, right=1, top=1, bottom=0)
         self._ax = None
         self._wcs = None
         self._image_artist = None
@@ -50,6 +59,10 @@ class SkyCanvas:
         self._overlap_pct = 10.0
         self._mosaic_plan = None
 
+        # Threaded rendering state
+        self._render_worker = None
+        self._render_id = 0  # Incremented each request, used for stale detection
+
     @property
     def figure(self) -> Figure:
         return self._figure
@@ -70,16 +83,78 @@ class SkyCanvas:
     def fov_deg(self) -> float:
         return self._fov_deg
 
+    def start_pan(self) -> tuple[float, float] | None:
+        """Prepare for live panning. Returns screen-to-data pixel scale factors."""
+        if self._ax is None:
+            return None
+        self._pan_xlim = self._ax.get_xlim()
+        self._pan_ylim = self._ax.get_ylim()
+        bbox = self._ax.get_window_extent()
+        if bbox.width < 1 or bbox.height < 1:
+            return None
+        # Clear non-FOV overlays (catalog labels, user images)
+        self._catalog_overlay.clear()
+        self._user_image_overlay.clear()
+        # Store FOV artist original positions for counter-shifting
+        self._pan_fov_origins = []
+        for artist in self._fov_overlay._artists:
+            if isinstance(artist, Polygon):
+                self._pan_fov_origins.append(
+                    ('poly', artist, artist.get_xy().copy()))
+            elif isinstance(artist, Line2D):
+                self._pan_fov_origins.append(
+                    ('line', artist,
+                     (list(artist.get_xdata()), list(artist.get_ydata()))))
+            elif hasattr(artist, 'get_position'):
+                self._pan_fov_origins.append(
+                    ('text', artist, artist.get_position()))
+        # Same for mosaic overlay
+        self._pan_mosaic_origins = []
+        for artist in self._mosaic_overlay._artists:
+            if isinstance(artist, Polygon):
+                self._pan_mosaic_origins.append(
+                    ('poly', artist, artist.get_xy().copy()))
+            elif isinstance(artist, Line2D):
+                self._pan_mosaic_origins.append(
+                    ('line', artist,
+                     (list(artist.get_xdata()), list(artist.get_ydata()))))
+            elif hasattr(artist, 'get_position'):
+                self._pan_mosaic_origins.append(
+                    ('text', artist, artist.get_position()))
+        sx = (self._pan_xlim[1] - self._pan_xlim[0]) / bbox.width
+        sy = (self._pan_ylim[1] - self._pan_ylim[0]) / bbox.height
+        return (sx, sy)
+
+    def pan_by_screen(self, dx: float, dy: float, sx: float, sy: float) -> None:
+        """Shift displayed view by screen-pixel offset from pan start (no re-render)."""
+        if self._ax is None or not hasattr(self, '_pan_xlim'):
+            return
+        dx_d = dx * sx
+        dy_d = dy * sy
+        self._ax.set_xlim(self._pan_xlim[0] - dx_d, self._pan_xlim[1] - dx_d)
+        self._ax.set_ylim(self._pan_ylim[0] - dy_d, self._pan_ylim[1] - dy_d)
+        # Counter-shift FOV/mosaic artists to keep them at screen center
+        for origins in (self._pan_fov_origins, self._pan_mosaic_origins):
+            for kind, artist, orig in origins:
+                if kind == 'poly':
+                    artist.set_xy(orig + np.array([-dx_d, -dy_d]))
+                elif kind == 'line':
+                    artist.set_xdata([x - dx_d for x in orig[0]])
+                    artist.set_ydata([y - dy_d for y in orig[1]])
+                elif kind == 'text':
+                    artist.set_position((orig[0] - dx_d, orig[1] - dy_d))
+        self._figure.canvas.draw_idle()
+
     def set_center(self, ra_deg: float, dec_deg: float) -> None:
         """Update view center and re-render."""
         self._ra_deg = ra_deg % 360.0
         self._dec_deg = max(-90.0, min(90.0, dec_deg))
-        self._render()
+        self._request_render()
 
     def set_fov(self, fov_deg: float) -> None:
         """Update FOV and re-render."""
         self._fov_deg = max(0.1, min(20.0, fov_deg))
-        self._render()
+        self._request_render()
 
     def pixel_to_world(self, x: float, y: float):
         """Convert pixel coordinates to sky coordinates.
@@ -107,10 +182,10 @@ class SkyCanvas:
         self._dec_deg = dec_deg
         self._fov_deg = fov_deg
         self._rotation_deg = rotation_deg
-        self._render()
+        self._request_render()
 
-    def _render(self) -> None:
-        """Render the sky view."""
+    def _request_render(self) -> None:
+        """Request a tile render on a background thread."""
         # Get canvas size in pixels from figure
         dpi = self._figure.get_dpi()
         fig_w, fig_h = self._figure.get_size_inches()
@@ -127,41 +202,76 @@ class SkyCanvas:
             width_px, height_px,
         )
 
-        # Render tiles
         canvas_shape = (height_px, width_px)
-        image = self._renderer.render(self._wcs, canvas_shape)
+
+        # Increment render ID for stale detection
+        self._render_id += 1
+        current_id = self._render_id
+
+        # Launch background render
+        self._render_worker = RenderWorker(
+            self._renderer, self._wcs, canvas_shape,
+        )
+        self._render_worker.finished.connect(
+            lambda img, wcs: self._on_render_complete(img, wcs, current_id)
+        )
+        self.rendering_started.emit()
+        self._render_worker.start()
+
+    def shutdown(self) -> None:
+        """Stop any running render worker. Call before closing the app."""
+        if self._render_worker is not None and self._render_worker.isRunning():
+            self._render_worker.wait(3000)  # wait up to 3 seconds
+            if self._render_worker.isRunning():
+                self._render_worker.terminate()
+                self._render_worker.wait(1000)
+
+    def _on_render_complete(self, image: np.ndarray, wcs: WCS,
+                            render_id: int) -> None:
+        """Handle completed render on main thread (all matplotlib here)."""
+        # Discard stale results — a newer render was requested
+        if render_id != self._render_id:
+            return
 
         # Set up axes
         self._figure.clear()
+        self._figure.subplots_adjust(left=0, right=1, top=1, bottom=0)
         self._ax = self._figure.add_subplot(111, projection=self._wcs)
         self._ax.set_facecolor('black')
 
-        # Display the rendered image
+        # Display the rendered image (low zorder so frame/overlays draw on top)
         self._image_artist = self._ax.imshow(
             image,
             origin='lower',
             interpolation='bilinear',
+            zorder=0,
         )
+
+        # Hide axes frame — sky fills edge to edge
+        self._ax.coords.frame.set_linewidth(0)
+        self._ax.coords.frame.set_color('none')
 
         # Configure coordinate grid
         overlay = self._ax.get_coords_overlay('icrs')
-        overlay[0].set_axislabel('RA (J2000)')
-        overlay[1].set_axislabel('Dec (J2000)')
+        overlay[0].set_axislabel('')
+        overlay[1].set_axislabel('')
         overlay[0].set_ticks_visible(True)
         overlay[1].set_ticks_visible(True)
         overlay.grid(color='white', alpha=0.3, linestyle='--', linewidth=0.5)
 
-        # Style the tick labels
-        overlay[0].set_ticklabel(color='white', size=8)
-        overlay[1].set_ticklabel(color='white', size=8)
-        overlay[0].set_axislabel_position('b')
-        overlay[1].set_axislabel_position('l')
+        # Place tick labels inside the axes frame
+        overlay[0].set_ticklabel(color='white', size=7, pad=-15)
+        overlay[1].set_ticklabel(color='white', size=7, pad=-30)
+        overlay[1].ticklabels.set_rotation(0)  # horizontal Dec labels
+        overlay[0].set_ticklabel_position('t')
+        overlay[1].set_ticklabel_position('r')
 
         # Draw overlays
         self._recompute_mosaic()
         self._draw_overlays()
 
         self._figure.canvas.draw_idle()
+        self.rendering_finished.emit()
 
     def set_camera(self, camera: CameraProfile, rotation_deg: float = None) -> None:
         """Set the camera profile for FOV overlay."""
