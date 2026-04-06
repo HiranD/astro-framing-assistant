@@ -1,7 +1,7 @@
 """Altitude chart widget — bottom panel showing target visibility."""
 
 import logging
-from datetime import datetime, date
+from datetime import date
 
 import numpy as np
 import pytz
@@ -161,14 +161,6 @@ class AltitudeWidget(QWidget):
                     f"{alt_data.transit_altitude:.0f}° Transit",
                     color='#ff6644', fontsize=7, ha='center', va='bottom',
                     zorder=7)
-
-        # "Now" marker (local time)
-        now = datetime.now()
-        if target_dates[0] <= now <= target_dates[-1]:
-            ax.axvline(x=now, color='#44ff44', linewidth=1,
-                       linestyle='-', alpha=0.7, zorder=6)
-            ax.text(now, 85, "Now", color='#44ff44', fontsize=7,
-                    ha='center', va='top', zorder=7)
 
         # Styling
         ax.set_ylim(-5, 90)
