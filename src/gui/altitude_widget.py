@@ -23,16 +23,18 @@ class _AltitudeWorker(QThread):
     """Background thread for altitude computation."""
     finished = pyqtSignal(object, list, list, str)  # AltitudeData, sun_times, sun_alts, timezone
 
-    def __init__(self, calculator: VisibilityCalculator, ra: float, dec: float) -> None:
+    def __init__(self, calculator: VisibilityCalculator, ra: float, dec: float,
+                 obs_date: date = None) -> None:
         super().__init__()
         self._calc = calculator
         self._ra = ra
         self._dec = dec
+        self._obs_date = obs_date
 
     def run(self) -> None:
         try:
-            alt_data = self._calc.compute_altitude_curve(self._ra, self._dec)
-            sun_times, sun_alts = self._calc.compute_sun_altitudes()
+            alt_data = self._calc.compute_altitude_curve(self._ra, self._dec, self._obs_date)
+            sun_times, sun_alts = self._calc.compute_sun_altitudes(self._obs_date)
             self.finished.emit(alt_data, sun_times, sun_alts, self._calc.timezone)
         except Exception:
             logger.exception("Altitude computation failed")
@@ -49,6 +51,7 @@ class AltitudeWidget(QWidget):
         self._worker = None
         self._ra = None
         self._dec = None
+        self._obs_date = date.today()
 
         self._figure = Figure(facecolor='#1a1a2e', figsize=(10, 2))
         self._canvas = FigureCanvasQTAgg(self._figure)
@@ -69,10 +72,21 @@ class AltitudeWidget(QWidget):
         """Compute and display altitude chart for a target."""
         self._ra = ra_deg
         self._dec = dec_deg
+        self._recompute()
 
-        self._worker = _AltitudeWorker(self._calculator, ra_deg, dec_deg)
+    def _recompute(self) -> None:
+        """Launch altitude computation with current target and date."""
+        if self._ra is None:
+            return
+        self._worker = _AltitudeWorker(
+            self._calculator, self._ra, self._dec, self._obs_date)
         self._worker.finished.connect(self._on_computed)
         self._worker.start()
+
+    def set_date(self, obs_date: date) -> None:
+        """Update observation date and recompute."""
+        self._obs_date = obs_date
+        self._recompute()
 
     @pyqtSlot(object, list, list, str)
     def _on_computed(self, alt_data: AltitudeData, sun_times: list, sun_alts: list, timezone: str) -> None:

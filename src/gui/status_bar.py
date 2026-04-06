@@ -38,3 +38,12 @@ class StatusBar(QStatusBar):
     def set_status(self, message: str) -> None:
         """Set status message."""
         self._status_label.setText(message)
+
+    def set_rendering(self, active: bool) -> None:
+        """Show or clear rendering indicator."""
+        if active:
+            self._status_label.setText("Rendering...")
+            self._status_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #ff8844;")
+        else:
+            self._status_label.setText("Ready")
+            self._status_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #44ff44;")

@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFileDialog, QMessageBox, QDockWidget,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QByteArray
 
 from config import load_config, save_config
 from core.visibility import ObserverConfig
@@ -31,10 +31,7 @@ class FramingApp(QMainWindow):
         self.setWindowTitle("Astro Framing Assistant")
         self._config = load_config()
 
-        self.resize(
-            self._config.get('window_width', 1400),
-            self._config.get('window_height', 900),
-        )
+        self.resize(1400, 900)
 
         self._tile_cache = None
         self._sky_widget = None
@@ -50,7 +47,9 @@ class FramingApp(QMainWindow):
         )
 
         # Control panel (left)
-        self._control_panel = ControlPanel()
+        self._control_panel = ControlPanel(config=self._config)
+        self._control_panel.setMinimumWidth(200)
+        self._control_panel.setMaximumWidth(280)
         left_dock = QDockWidget("Controls", self)
         left_dock.setWidget(self._control_panel)
         left_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
@@ -63,13 +62,23 @@ class FramingApp(QMainWindow):
         bottom_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, bottom_dock)
 
-        # Image source panel (right)
+        # Tools panel (right)
         self._image_panel = ImageSourcePanel(self._config)
-        right_dock = QDockWidget("Image Sources", self)
+        self._image_panel.setMinimumWidth(240)
+        self._image_panel.setMaximumWidth(320)
+        right_dock = QDockWidget("Tools", self)
         right_dock.setWidget(self._image_panel)
         right_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
         self._right_dock = right_dock
+
+        # Restore window geometry (position + size only, not dock state)
+        geo = self._config.get('window_geometry')
+        if geo:
+            self.restoreGeometry(QByteArray.fromBase64(geo.encode()))
+
+        # Placeholder central widget until cache loads
+        self.setCentralWidget(QWidget(self))
 
         # Status bar
         self._status_bar = StatusBar(self)
@@ -98,7 +107,7 @@ class FramingApp(QMainWindow):
         atlas_action = view_menu.addAction("Sky Atlas...")
         atlas_action.triggered.connect(self._on_sky_atlas)
 
-        images_action = view_menu.addAction("Image Sources")
+        images_action = view_menu.addAction("Tools")
         images_action.triggered.connect(lambda: self._right_dock.show())
 
     def _load_catalog(self) -> None:
@@ -116,7 +125,21 @@ class FramingApp(QMainWindow):
 
     def _try_load_cache(self) -> None:
         cache_path = self._config.get('cache_path')
-        if cache_path and Path(cache_path).is_dir():
+
+        # Saved path no longer exists
+        if cache_path and not Path(cache_path).is_dir():
+            reply = QMessageBox.warning(
+                self, "Cache Path Not Found",
+                f"The saved sky tile cache path no longer exists:\n\n"
+                f"{cache_path}\n\n"
+                "Would you like to select a new FramingAssistantCache folder?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._on_set_cache_path()
+            return
+
+        if cache_path:
             self._load_cache(cache_path)
             return
 
@@ -126,9 +149,16 @@ class FramingApp(QMainWindow):
             self._load_cache(str(default_cache))
             return
 
-        self._status_bar.set_status(
-            "No cache found. Use File → Set Cache Path to load sky tiles."
+        reply = QMessageBox.information(
+            self, "Sky Tile Cache Required",
+            "No sky tile cache found.\n\n"
+            "This app uses N.I.N.A.'s offline FramingAssistantCache\n"
+            "for sky background tiles (~3.3 GB).\n\n"
+            "Would you like to select your FramingAssistantCache folder?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._on_set_cache_path()
 
     def _load_cache(self, cache_path: str) -> None:
         self._tile_cache = TileCache(cache_path)
@@ -154,13 +184,29 @@ class FramingApp(QMainWindow):
         self._control_panel.fov_changed.connect(self._sky_widget.set_fov)
         self._control_panel.camera_changed.connect(self._sky_widget.set_camera)
         self._control_panel.rotation_changed.connect(self._sky_widget.set_camera_rotation)
-        self._control_panel.mosaic_changed.connect(self._sky_widget.set_mosaic)
+        self._image_panel.mosaic_changed.connect(self._sky_widget.set_mosaic)
         self._sky_widget.cursor_moved.connect(self._status_bar.update_cursor)
         self._sky_widget.view_changed.connect(self._control_panel.update_display)
         self._sky_widget.view_changed.connect(self._status_bar.update_fov)
 
+        # Wire rendering indicator
+        self._sky_widget.sky_canvas.rendering_started.connect(
+            lambda: self._status_bar.set_rendering(True)
+        )
+        self._sky_widget.sky_canvas.rendering_started.connect(
+            lambda: self._control_panel.set_rendering(True)
+        )
+        self._sky_widget.sky_canvas.rendering_finished.connect(
+            lambda: self._status_bar.set_rendering(False)
+        )
+        self._sky_widget.sky_canvas.rendering_finished.connect(
+            lambda: self._control_panel.set_rendering(False)
+        )
+
         # Wire image panel
         self._image_panel.images_changed.connect(self._on_images_changed)
+        self._image_panel.location_changed.connect(self._on_location_changed)
+        self._image_panel.date_changed.connect(self._altitude_widget.set_date)
 
         self._sky_widget.show_initial_view()
         self._altitude_widget.set_target(10.685, 41.269)
@@ -192,8 +238,6 @@ class FramingApp(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec():
             self._config = load_config()
-            self._observer_config = dialog.get_observer_config()
-            self._altitude_widget.update_observer(self._observer_config)
             new_cache = self._config.get('cache_path', '')
             if new_cache and new_cache != old_cache:
                 self._load_cache(new_cache)
@@ -216,6 +260,11 @@ class FramingApp(QMainWindow):
         if self._sky_widget:
             self._sky_widget.sky_canvas.set_user_images(self._image_panel.images)
 
+    def _on_location_changed(self, config) -> None:
+        """Handle observer location change."""
+        self._observer_config = config
+        self._altitude_widget.update_observer(config)
+
     def _on_atlas_target(self, ra: float, dec: float, name: str) -> None:
         """Handle target selected from Sky Atlas."""
         if self._sky_widget:
@@ -223,8 +272,10 @@ class FramingApp(QMainWindow):
         self._altitude_widget.set_target(ra, dec)
 
     def closeEvent(self, event) -> None:
-        size = self.size()
-        self._config['window_width'] = size.width()
-        self._config['window_height'] = size.height()
+        # Stop background render thread before closing
+        if self._sky_widget:
+            self._sky_widget.sky_canvas.shutdown()
+        self._config['window_geometry'] = self.saveGeometry().toBase64().data().decode()
+        self._config.pop('window_state', None)
         save_config(self._config)
         super().closeEvent(event)
