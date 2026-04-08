@@ -1,0 +1,112 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: dmg
+          - os: windows-latest
+            artifact: zip
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install astroplan astropy matplotlib numpy pillow pyqt6 pyqtdarktheme reproject timezonefinder xisf
+
+      - name: Install macOS extras
+        if: runner.os == 'macOS'
+        run: pip install pyobjc-framework-Cocoa
+
+      - name: Build with PyInstaller
+        run: pyinstaller astro_framing.spec --noconfirm
+
+      - name: Create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "Astro Framing Assistant" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 400 185 \
+            --icon "Astro Framing Assistant.app" 175 185 \
+            "AstroFramingAssistant-macOS.dmg" \
+            "dist/Astro Framing Assistant.app"
+
+      - name: Create ZIP (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\AstroFramingAssistant\*" -DestinationPath "AstroFramingAssistant-Windows.zip"
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: AstroFramingAssistant-macOS.dmg
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: AstroFramingAssistant-Windows.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            **macOS:** Download the `.dmg`, open it, and drag the app to Applications.
+            > First launch: right-click the app and select "Open" to bypass Gatekeeper.
+
+            **Windows:** Download the `.zip`, extract it, and run `AstroFramingAssistant.exe`.
+
+            ## Sky Tile Cache (Required)
+
+            This app uses N.I.N.A.'s offline sky tiles (~3.3 GB) for the sky background.
+            Download the cache from:
+            **https://nighttime-imaging.eu/downloads/Setup/Releases/FramingAssistantCache_Full.zip**
+
+            Extract the zip and point the app to the `FramingAssistantCache` folder on first launch.
+          files: |
+            AstroFramingAssistant-macOS.dmg
+            AstroFramingAssistant-Windows.zip

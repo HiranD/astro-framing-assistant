@@ -14,7 +14,11 @@ if sys.platform == 'darwin':
         pass
 
 # Add src/ to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+if getattr(sys, 'frozen', False):
+    _base = sys._MEIPASS
+else:
+    _base = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(_base, 'src'))
 
 
 def main():
