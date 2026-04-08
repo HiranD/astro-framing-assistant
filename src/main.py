@@ -2,12 +2,30 @@
 
 import sys
 import logging
+import traceback
+from pathlib import Path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(name)s %(levelname)s: %(message)s',
-    datefmt='%H:%M:%S',
-)
+# Log to file when frozen (no console)
+if getattr(sys, 'frozen', False):
+    log_path = Path.home() / '.astro-framing' / 'app.log'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(name)s %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S',
+        filename=str(log_path),
+        filemode='w',
+    )
+    # Catch unhandled exceptions so PyQt6 doesn't abort
+    def _excepthook(exc_type, exc_value, exc_tb):
+        logging.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_tb))
+    sys.excepthook = _excepthook
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(name)s %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S',
+    )
 
 
 def run_app() -> None:

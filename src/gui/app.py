@@ -112,8 +112,8 @@ class FramingApp(QMainWindow):
 
     def _load_catalog(self) -> None:
         """Load the catalog database."""
-        app_dir = Path(__file__).resolve().parent.parent.parent
-        db_path = app_dir / 'data' / 'astro_objects.db'
+        from app_paths import get_db_path
+        db_path = get_db_path()
         if db_path.exists():
             self._catalog_engine = CatalogSearchEngine(str(db_path))
             self._control_panel.set_catalog_engine(self._catalog_engine)
@@ -143,8 +143,8 @@ class FramingApp(QMainWindow):
             self._load_cache(cache_path)
             return
 
-        app_dir = Path(__file__).resolve().parent.parent.parent
-        default_cache = app_dir / 'FramingAssistantCache'
+        from app_paths import get_app_dir
+        default_cache = get_app_dir() / 'FramingAssistantCache'
         if default_cache.is_dir():
             self._load_cache(str(default_cache))
             return
