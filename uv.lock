@@ -48,7 +48,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
     { name = "pyqt6", specifier = ">=6.11.0" },
-    { name = "pyqtdarktheme", specifier = ">=2.1.0" },
+    { name = "pyqtdarktheme", specifier = ">=2.1.0,<3" },
     { name = "reproject", specifier = ">=0.14.1" },
     { name = "timezonefinder", specifier = ">=8.2.0" },
     { name = "xisf", specifier = ">=0.9.5" },
