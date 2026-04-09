@@ -70,6 +70,8 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+_icon = 'assets/icon.icns' if sys.platform == 'darwin' else 'assets/icon.ico'
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -82,6 +84,7 @@ exe = EXE(
     upx=True,
     console=False,
     disable_windowed_traceback=False,
+    icon=_icon,
 )
 
 coll = COLLECT(
@@ -101,6 +104,7 @@ if sys.platform == 'darwin':
         coll,
         name='Astro Framing Assistant.app',
         bundle_identifier='com.astroframing.assistant',
+        icon='assets/icon.icns',
         info_plist={
             'CFBundleDisplayName': 'Astro Framing Assistant',
             'CFBundleShortVersionString': '0.1.0',
