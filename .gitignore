@@ -13,5 +13,6 @@ wheels/
 
 FramingAssistantCache
 
-# Local icon generator (not committed)
+# Local generator scripts (not committed)
 scripts/generate_icon.py
+scripts/generate_dmg_background.py
