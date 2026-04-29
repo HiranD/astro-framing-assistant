@@ -19,6 +19,7 @@ from sky.overlays import FovOverlay, MosaicOverlay, CatalogOverlay, UserImageOve
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan, compute_mosaic
 from core.catalog import CatalogSearchEngine
+from core.memlog import log_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class SkyCanvas(QObject):
         # Threaded rendering state
         self._render_worker = None
         self._render_id = 0  # Incremented each request, used for stale detection
+        self._pending_render = False  # Latches requests that arrive while a worker is in flight
 
     @property
     def figure(self) -> Figure:
@@ -187,6 +189,15 @@ class SkyCanvas(QObject):
 
     def _request_render(self) -> None:
         """Request a tile render on a background thread."""
+        # Coalesce: if a worker is already in flight, latch a pending flag and
+        # return. _on_render_complete will re-fire once the current render
+        # finishes, picking up whatever ra/dec/fov/canvas size is current then.
+        # Without this, rapid pan/resize bursts spawn concurrent workers that
+        # each allocate ~100+ MB of float64 reproject buffers.
+        if self._render_worker is not None and self._render_worker.isRunning():
+            self._pending_render = True
+            return
+
         # Get canvas size in pixels from figure
         dpi = self._figure.get_dpi()
         fig_w, fig_h = self._figure.get_size_inches()
@@ -208,6 +219,20 @@ class SkyCanvas(QObject):
         # Increment render ID for stale detection
         self._render_id += 1
         current_id = self._render_id
+
+        ti = TileCache._load_tile_cached.cache_info()
+        log_snapshot(
+            "render_start",
+            id=current_id,
+            ra=f"{self._ra_deg:.2f}",
+            dec=f"{self._dec_deg:.2f}",
+            fov=f"{self._fov_deg:.2f}",
+            canvas=f"{width_px}x{height_px}",
+            tiles=f"{ti.currsize}/{ti.maxsize}",
+            thits=ti.hits,
+            tmiss=ti.misses,
+            n_user_imgs=len(self._user_images),
+        )
 
         # Launch background render
         self._render_worker = RenderWorker(
@@ -272,7 +297,26 @@ class SkyCanvas(QObject):
         self._draw_overlays()
 
         self._figure.canvas.draw_idle()
+
+        ti = TileCache._load_tile_cached.cache_info()
+        ax = self._ax
+        log_snapshot(
+            "render_done",
+            id=render_id,
+            tiles=f"{ti.currsize}/{ti.maxsize}",
+            thits=ti.hits,
+            tmiss=ti.misses,
+            imgs=len(ax.images),
+            patches=len(ax.patches),
+            lines=len(ax.lines),
+            texts=len(ax.texts),
+        )
         self.rendering_finished.emit()
+
+        # Drain any request that arrived while this render was in flight.
+        if self._pending_render:
+            self._pending_render = False
+            self._request_render()
 
     def set_camera(self, camera: CameraProfile, rotation_deg: float = None) -> None:
         """Set the camera profile for FOV overlay."""

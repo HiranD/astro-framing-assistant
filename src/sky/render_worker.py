@@ -1,10 +1,14 @@
 """Background worker thread for tile rendering."""
 
+import logging
+
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 from astropy.wcs import WCS
 
 from sky.tile_renderer import TileRenderer
+
+logger = logging.getLogger(__name__)
 
 
 class RenderWorker(QThread):
@@ -24,5 +28,12 @@ class RenderWorker(QThread):
         self._canvas_shape = canvas_shape
 
     def run(self) -> None:
-        image = self._renderer.render(self._target_wcs, self._canvas_shape)
+        try:
+            image = self._renderer.render(self._target_wcs, self._canvas_shape)
+        except Exception:
+            # Without this, exceptions in the QThread bypass sys.excepthook
+            # and abort the process silently in a windowed .app bundle.
+            logger.exception("Render worker failed; emitting empty image")
+            h, w = self._canvas_shape
+            image = np.zeros((h, w, 3), dtype=np.uint8)
         self.finished.emit(image, self._target_wcs)
