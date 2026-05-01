@@ -360,8 +360,7 @@ class CatalogOverlay:
                     break
 
             if not overlaps:
-                # Use short name
-                display = obj.name
+                display = obj.display_name or obj.name
                 if obj.catalog == 'Messier':
                     display = f"M{obj.catalog_number.lstrip('0')}"
 

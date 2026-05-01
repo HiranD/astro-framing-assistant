@@ -404,11 +404,13 @@ class ControlPanel(QWidget):
         self._suggest_mapping.clear()
         items = []
         for obj, _score, match_key in results:
-            # Show matched alias if different from primary name
-            if match_key.lower() != obj.name.lower():
-                label = f"{match_key.upper()} ({obj.name}) — {obj.object_type}"
+            type_suffix = f" — {obj.object_type}" if obj.object_type else ""
+            display = obj.display_name or obj.name
+            mk = match_key.lower()
+            if mk != display.lower() and mk != obj.name.lower():
+                label = f"{display} ({match_key}){type_suffix}"
             else:
-                label = f"{obj.name} — {obj.object_type}"
+                label = f"{display}{type_suffix}"
             items.append(label)
             self._suggest_mapping[label] = obj
         self._suggest_model.setStringList(items)
@@ -421,14 +423,15 @@ class ControlPanel(QWidget):
         if obj is None:
             return
         self._suggest_timer.stop()
-        self._last_resolved = {'name': obj.name, 'ra': obj.ra_deg, 'dec': obj.dec_deg}
-        self._add_recent_target(obj.name, obj.ra_deg, obj.dec_deg)
-        self._search_status.setText(f"{obj.name} found")
+        display = obj.display_name or obj.name
+        self._last_resolved = {'name': display, 'ra': obj.ra_deg, 'dec': obj.dec_deg}
+        self._add_recent_target(display, obj.ra_deg, obj.dec_deg)
+        self._search_status.setText(f"{display} found")
         self._search_status.setStyleSheet("color: lightgreen; font-size: 11px;")
         self.target_changed.emit(obj.ra_deg, obj.dec_deg)
         # QCompleter overwrites the line edit after activated fires,
         # so we defer setting just the object name
-        QTimer.singleShot(0, lambda: self._set_name_quietly(obj.name))
+        QTimer.singleShot(0, lambda: self._set_name_quietly(display))
 
     def _set_name_quietly(self, name: str) -> None:
         """Set the name edit text without triggering autosuggest."""

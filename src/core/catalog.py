@@ -28,6 +28,30 @@ class CatalogObject:
     minor_axis_arcmin: Optional[float]
     constellation: Optional[str]
     position_angle: Optional[float]
+    display_name: str = ''
+
+
+# Primary names that begin with these prefixes are raw SIMBAD-style identifiers
+# (e.g. "NAME lam Ori Molecular Ring", "[DB2002] G123", "* alf Cam"). When a
+# cleaner alias exists, prefer it for display.
+_UGLY_NAME_PREFIXES = (
+    "NAME ",
+    "[",
+    "Cl ", "Cl*",
+    "OCl ",
+    "GAL ",
+    "MWSC ",
+    "2MASS",
+)
+
+
+def _is_ugly_name(s: str) -> bool:
+    s = s.strip()
+    if not s:
+        return True
+    if s.startswith("*"):
+        return True
+    return s.startswith(_UGLY_NAME_PREFIXES)
 
 
 # Catalog pattern matchers: (regex, catalog_name)
@@ -97,12 +121,32 @@ class CatalogSearchEngine:
                     self._catalog_index[cat] = {}
                 self._catalog_index[cat][obj.catalog_number.lstrip('0') or '0'] = obj.id
 
-        # Load aliases
-        cursor.execute("SELECT object_id, alias_name FROM object_aliases")
+        # Load aliases (priority desc; tie-break by shorter name first)
+        cursor.execute(
+            "SELECT object_id, alias_name, priority FROM object_aliases "
+            "ORDER BY object_id, priority DESC, length(alias_name) ASC"
+        )
+        aliases_by_oid: dict[int, list[str]] = {}
         for row in cursor.fetchall():
-            key = ' '.join(row['alias_name'].lower().split())
-            if key not in self._name_to_id and row['object_id'] in self._objects:
-                self._name_to_id[key] = row['object_id']
+            oid = row['object_id']
+            alias = row['alias_name']
+            if oid not in self._objects:
+                continue
+            aliases_by_oid.setdefault(oid, []).append(alias)
+            key = ' '.join(alias.lower().split())
+            if key not in self._name_to_id:
+                self._name_to_id[key] = oid
+
+        # Pick a clean display name when the primary name is a raw SIMBAD-style identifier
+        for oid, obj in self._objects.items():
+            if not _is_ugly_name(obj.name):
+                obj.display_name = obj.name
+                continue
+            chosen = next(
+                (a for a in aliases_by_oid.get(oid, ()) if not _is_ugly_name(a)),
+                None,
+            )
+            obj.display_name = chosen or obj.name
 
         # Sort keys for binary search
         self._sorted_keys = sorted(self._name_to_id.keys())

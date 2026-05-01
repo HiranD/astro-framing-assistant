@@ -187,9 +187,12 @@ class CatalogDialog(QDialog):
         self._table.setRowCount(len(objects))
 
         for i, obj in enumerate(objects):
-            # Show matched alias if different from primary name
+            display = obj.display_name or obj.name
             alias = self._matched_names.get(obj.id)
-            name_text = f"{alias.upper()} ({obj.name})" if alias else obj.name
+            if alias and alias.lower() != display.lower() and alias.lower() != obj.name.lower():
+                name_text = f"{display} ({alias})"
+            else:
+                name_text = display
             self._table.setItem(i, 0, QTableWidgetItem(name_text))
             self._table.setItem(i, 1, QTableWidgetItem(obj.object_type))
             self._table.setItem(i, 2, QTableWidgetItem(format_ra(obj.ra_deg)))
@@ -220,7 +223,7 @@ class CatalogDialog(QDialog):
         row = index.row()
         if 0 <= row < len(self._results):
             obj = self._results[row]
-            self.target_selected.emit(obj.ra_deg, obj.dec_deg, obj.name)
+            self.target_selected.emit(obj.ra_deg, obj.dec_deg, obj.display_name or obj.name)
 
     def _on_send(self) -> None:
         """Send selected object to framing."""
@@ -229,4 +232,4 @@ class CatalogDialog(QDialog):
             row = rows[0].row()
             if 0 <= row < len(self._results):
                 obj = self._results[row]
-                self.target_selected.emit(obj.ra_deg, obj.dec_deg, obj.name)
+                self.target_selected.emit(obj.ra_deg, obj.dec_deg, obj.display_name or obj.name)
