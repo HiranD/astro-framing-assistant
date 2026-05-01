@@ -10,6 +10,9 @@ wheels/
 .venv
 .claude
 
+# macOS
+.DS_Store
+
 
 FramingAssistantCache
 
