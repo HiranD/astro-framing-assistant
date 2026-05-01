@@ -1,5 +1,7 @@
 """Application bootstrap for Astro Framing Assistant."""
 
+import datetime as _dt
+import os as _os
 import sys
 import logging
 import traceback
@@ -14,7 +16,14 @@ if getattr(sys, 'frozen', False):
         format='%(asctime)s %(name)s %(levelname)s: %(message)s',
         datefmt='%H:%M:%S',
         filename=str(log_path),
-        filemode='w',
+        # Append: prior session's tail (including a hang/crash) survives
+        # into the next launch's log instead of being overwritten.
+        filemode='a',
+    )
+    logging.info(
+        "=== SESSION START %s pid=%d ===",
+        _dt.datetime.now().isoformat(timespec='seconds'),
+        _os.getpid(),
     )
     # Catch unhandled exceptions so PyQt6 doesn't abort
     def _excepthook(exc_type, exc_value, exc_tb):

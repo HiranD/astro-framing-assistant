@@ -9,6 +9,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from core.memlog import log_snapshot
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,11 +36,20 @@ def load_image(filepath: str | Path) -> ImageData:
     if ext != '.xisf':
         raise ValueError(f"Unsupported format: {ext} (only .xisf is supported)")
 
+    log_snapshot("xisf_load_enter", path=path.name)
     data, wcs = _load_xisf(path)
+    log_snapshot(
+        "xisf_load_data",
+        path=path.name,
+        shape=str(data.shape),
+        dtype=str(data.dtype),
+    )
     data = _normalize(data)
+    log_snapshot("xisf_normalize_done", path=path.name, shape=str(data.shape))
     h, w = data.shape[:2]
 
     logger.info("Loaded %s (%dx%d, WCS=%s)", path.name, w, h, wcs is not None)
+    log_snapshot("xisf_load_exit", path=path.name, w=w, h=h)
     return ImageData(
         filepath=path, data=data, wcs=wcs,
         label=path.stem, width=w, height=h,

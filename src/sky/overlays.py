@@ -15,6 +15,8 @@ from core.camera import CameraProfile
 from core.mosaic import MosaicPlan
 from core.catalog import CatalogSearchEngine, CatalogObject
 from core.image_loader import ImageData, downsample_for_display
+from core import memlog
+from core.memlog import log_snapshot
 
 
 def _compute_fov_corners(
@@ -458,38 +460,51 @@ class UserImageOverlay:
         """Reproject and display the user image."""
         from reproject import reproject_interp
 
-        display_data, factor = downsample_for_display(img.data)
+        try:
+            display_data, factor = downsample_for_display(img.data)
+            log_snapshot(
+                "user_img_full_enter",
+                label=img.label,
+                factor=factor,
+                ds=f"{display_data.shape[0]}x{display_data.shape[1]}",
+                canvas=f"{canvas_shape[0]}x{canvas_shape[1]}",
+            )
 
-        # Build downsampled WCS
-        if factor > 1:
-            ds_wcs = img.wcs.deepcopy()
-            ds_wcs.wcs.crpix = ds_wcs.wcs.crpix / factor
-            if hasattr(ds_wcs.wcs, 'cd') and ds_wcs.wcs.cd is not None:
-                ds_wcs.wcs.cd = ds_wcs.wcs.cd * factor
-            elif hasattr(ds_wcs.wcs, 'cdelt'):
-                ds_wcs.wcs.cdelt = ds_wcs.wcs.cdelt * factor
-        else:
-            ds_wcs = img.wcs
+            # Build downsampled WCS
+            if factor > 1:
+                ds_wcs = img.wcs.deepcopy()
+                ds_wcs.wcs.crpix = ds_wcs.wcs.crpix / factor
+                if hasattr(ds_wcs.wcs, 'cd') and ds_wcs.wcs.cd is not None:
+                    ds_wcs.wcs.cd = ds_wcs.wcs.cd * factor
+                elif hasattr(ds_wcs.wcs, 'cdelt'):
+                    ds_wcs.wcs.cdelt = ds_wcs.wcs.cdelt * factor
+            else:
+                ds_wcs = img.wcs
 
-        height, width = canvas_shape
-        rgb_out = np.zeros((height, width, 3), dtype=np.float32)
+            height, width = canvas_shape
+            memlog.check_ceiling("user_img_rgb_alloc")
+            rgb_out = np.zeros((height, width, 3), dtype=np.float32)
 
-        for ch in range(min(3, display_data.shape[2])):
-            try:
-                reprojected, _ = reproject_interp(
-                    (display_data[:, :, ch].astype(np.float64), ds_wcs),
-                    canvas_wcs, shape_out=(height, width),
-                )
-                mask = np.isfinite(reprojected)
-                rgb_out[:, :, ch] = np.where(mask, reprojected, 0.0)
-            except Exception:
-                pass
+            for ch in range(min(3, display_data.shape[2])):
+                try:
+                    reprojected, _ = reproject_interp(
+                        (display_data[:, :, ch].astype(np.float64), ds_wcs),
+                        canvas_wcs, shape_out=(height, width),
+                    )
+                    mask = np.isfinite(reprojected)
+                    rgb_out[:, :, ch] = np.where(mask, reprojected, 0.0)
+                except Exception:
+                    pass
+                log_snapshot("user_img_channel", label=img.label, ch=ch)
 
-        artist = ax.imshow(
-            rgb_out, origin='lower', alpha=img.opacity,
-            interpolation='bilinear',
-        )
-        self._artists.append(artist)
+            artist = ax.imshow(
+                rgb_out, origin='lower', alpha=img.opacity,
+                interpolation='bilinear',
+            )
+            self._artists.append(artist)
+            log_snapshot("user_img_full_exit", label=img.label)
+        except MemoryError:
+            log_snapshot("user_img_full_aborted", label=img.label, reason="ceiling")
 
     def clear(self) -> None:
         for artist in self._artists:

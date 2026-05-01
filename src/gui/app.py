@@ -6,11 +6,12 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFileDialog, QMessageBox, QDockWidget,
 )
-from PyQt6.QtCore import Qt, QByteArray
+from PyQt6.QtCore import Qt, QByteArray, QTimer
 
 from config import load_config, save_config
 from core.visibility import ObserverConfig
 from core.catalog import CatalogSearchEngine
+from core.memlog import log_snapshot
 from sky.tile_cache import TileCache
 from gui.sky_widget import SkyWidget
 from gui.control_panel import ControlPanel
@@ -21,6 +22,8 @@ from gui.catalog_dialog import CatalogDialog
 from gui.image_source_panel import ImageSourcePanel
 
 logger = logging.getLogger(__name__)
+
+HEARTBEAT_INTERVAL_MS = 30_000  # 30 seconds
 
 
 class FramingApp(QMainWindow):
@@ -87,6 +90,39 @@ class FramingApp(QMainWindow):
         self._setup_menu()
         self._load_catalog()
         self._try_load_cache()
+
+        # Idle heartbeat: emits a MEMLOG line every 30 s while the app is
+        # alive so we can see RSS during true idle (no renders firing).
+        # Critical for the >100 GB explosion which only happens after
+        # several minutes of inactivity.
+        self._heartbeat_count = 0
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.setInterval(HEARTBEAT_INTERVAL_MS)
+        self._heartbeat_timer.timeout.connect(self._on_heartbeat)
+        self._heartbeat_timer.start()
+
+    def _on_heartbeat(self) -> None:
+        self._heartbeat_count += 1
+        idle = -1.0
+        if self._sky_widget is not None:
+            try:
+                idle = self._sky_widget.sky_canvas.seconds_since_last_render_request()
+            except Exception:
+                pass
+        log_snapshot(
+            "heartbeat",
+            n=self._heartbeat_count,
+            idle_s=f"{idle:.1f}",
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        new = event.size()
+        log_snapshot(
+            "window_resize",
+            w=new.width(),
+            h=new.height(),
+        )
+        super().resizeEvent(event)
 
     def _setup_menu(self) -> None:
         menu_bar = self.menuBar()

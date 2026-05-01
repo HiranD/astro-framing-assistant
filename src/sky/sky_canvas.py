@@ -1,6 +1,7 @@
 """Sky canvas — matplotlib Figure with WCSAxes for sky rendering."""
 
 import logging
+import time
 
 import numpy as np
 import matplotlib
@@ -19,7 +20,13 @@ from sky.overlays import FovOverlay, MosaicOverlay, CatalogOverlay, UserImageOve
 from core.camera import CameraProfile
 from core.mosaic import MosaicPlan, compute_mosaic
 from core.catalog import CatalogSearchEngine
+from core import memlog
 from core.memlog import log_snapshot
+
+# Hard upper bound on render canvas dimensions. A 5° FOV view at 8000×8000
+# in float64 RGB is already ~1.5GB before any reproject buffers; nothing
+# legitimate goes above this. Catches DPI-corruption on display wake.
+MAX_CANVAS_DIM = 8000
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +72,7 @@ class SkyCanvas(QObject):
         self._render_worker = None
         self._render_id = 0  # Incremented each request, used for stale detection
         self._pending_render = False  # Latches requests that arrive while a worker is in flight
+        self._last_render_request_ts = time.monotonic()  # For idle-seconds heartbeat
 
     @property
     def figure(self) -> Figure:
@@ -187,8 +195,32 @@ class SkyCanvas(QObject):
         self._rotation_deg = rotation_deg
         self._request_render()
 
+    def seconds_since_last_render_request(self) -> float:
+        """How long the canvas has been idle (no render request fired)."""
+        return time.monotonic() - self._last_render_request_ts
+
     def _request_render(self) -> None:
         """Request a tile render on a background thread."""
+        self._last_render_request_ts = time.monotonic()
+
+        # Get raw figure size up front so we can log every entry, including
+        # ones that get dropped (coalesced, zero-sized, ceiling-blocked).
+        dpi = self._figure.get_dpi()
+        fig_w, fig_h = self._figure.get_size_inches()
+        raw_w = int(fig_w * dpi)
+        raw_h = int(fig_h * dpi)
+
+        log_snapshot(
+            "request_render_called",
+            running=self._render_worker is not None and self._render_worker.isRunning(),
+            pending=self._pending_render,
+            dpi=f"{dpi:.0f}",
+            raw_canvas=f"{raw_w}x{raw_h}",
+            ra=f"{self._ra_deg:.2f}",
+            dec=f"{self._dec_deg:.2f}",
+            fov=f"{self._fov_deg:.2f}",
+        )
+
         # Coalesce: if a worker is already in flight, latch a pending flag and
         # return. _on_render_complete will re-fire once the current render
         # finishes, picking up whatever ra/dec/fov/canvas size is current then.
@@ -198,14 +230,29 @@ class SkyCanvas(QObject):
             self._pending_render = True
             return
 
-        # Get canvas size in pixels from figure
-        dpi = self._figure.get_dpi()
-        fig_w, fig_h = self._figure.get_size_inches()
-        width_px = int(fig_w * dpi)
-        height_px = int(fig_h * dpi)
-
-        if width_px < 10 or height_px < 10:
+        if raw_w < 10 or raw_h < 10:
             return
+
+        # Pre-flight ceiling check on the main thread. If we're already near
+        # the limit, refusing to start the render is far cheaper than letting
+        # a worker discover MemoryError mid-reproject.
+        try:
+            memlog.check_ceiling("request_render")
+        except MemoryError:
+            log_snapshot("request_render_aborted", reason="ceiling")
+            return
+
+        # Hard clamp canvas dimensions. Catches a DPI-corrupted resize event
+        # (e.g. wake from display sleep) that would otherwise allocate a
+        # multi-GB canvas. matplotlib will scale the result to the actual
+        # widget size on display.
+        width_px = min(raw_w, MAX_CANVAS_DIM)
+        height_px = min(raw_h, MAX_CANVAS_DIM)
+        if width_px != raw_w or height_px != raw_h:
+            logger.warning(
+                "Canvas clamped from %dx%d to %dx%d (dpi=%.0f figsize=%.1fx%.1fin)",
+                raw_w, raw_h, width_px, height_px, dpi, fig_w, fig_h,
+            )
 
         # Build WCS for current view
         self._wcs = build_canvas_wcs(
