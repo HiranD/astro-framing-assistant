@@ -51,7 +51,14 @@ def _is_ugly_name(s: str) -> bool:
         return True
     if s.startswith("*"):
         return True
-    return s.startswith(_UGLY_NAME_PREFIXES)
+    if s.startswith(_UGLY_NAME_PREFIXES):
+        return True
+    # All-caps catalog tokens like CALDWELL/BARNARD/ABELL/BAT99. Length >=4
+    # so NGC/IC/M (legitimate acronyms) stay clean.
+    first = s.split(maxsplit=1)[0]
+    if len(first) >= 4 and first.isupper():
+        return True
+    return False
 
 
 # Catalog pattern matchers: (regex, catalog_name)
@@ -83,6 +90,7 @@ class CatalogSearchEngine:
         # In-memory indexes
         self._objects: dict[int, CatalogObject] = {}
         self._name_to_id: dict[str, int] = {}
+        self._original_keys: dict[str, str] = {}  # normalized key -> first original-case form
         self._catalog_index: dict[str, dict[str, int]] = {}
         self._sorted_keys: list[str] = []
 
@@ -115,6 +123,7 @@ class CatalogSearchEngine:
             # Index by name (normalize whitespace)
             key = ' '.join(obj.name.lower().split())
             self._name_to_id[key] = obj.id
+            self._original_keys.setdefault(key, obj.name)
             if obj.catalog and obj.catalog_number:
                 cat = obj.catalog.lower()
                 if cat not in self._catalog_index:
@@ -136,6 +145,7 @@ class CatalogSearchEngine:
             key = ' '.join(alias.lower().split())
             if key not in self._name_to_id:
                 self._name_to_id[key] = oid
+            self._original_keys.setdefault(key, alias)
 
         # Pick a clean display name when the primary name is a raw SIMBAD-style identifier
         for oid, obj in self._objects.items():
@@ -146,7 +156,16 @@ class CatalogSearchEngine:
                 (a for a in aliases_by_oid.get(oid, ()) if not _is_ugly_name(a)),
                 None,
             )
-            obj.display_name = chosen or obj.name
+            if chosen:
+                obj.display_name = chosen
+                continue
+            # No clean alias — construct from catalog + catalog_number when both
+            # are populated and the catalog field itself is presentable.
+            if obj.catalog and obj.catalog_number and not _is_ugly_name(obj.catalog):
+                num = obj.catalog_number.lstrip('0') or '0'
+                obj.display_name = f"{obj.catalog} {num}"
+            else:
+                obj.display_name = obj.name
 
         # Sort keys for binary search
         self._sorted_keys = sorted(self._name_to_id.keys())
@@ -236,7 +255,11 @@ class CatalogSearchEngine:
         # Sort by score, return top results
         sorted_results = sorted(results.items(), key=lambda x: x[1], reverse=True)
         return [
-            (self._objects[oid], score, matched.get(oid, self._objects[oid].name))
+            (
+                self._objects[oid],
+                score,
+                self._original_keys.get(matched.get(oid, ''), matched.get(oid, self._objects[oid].name)),
+            )
             for oid, score in sorted_results[:max_results]
             if oid in self._objects
         ]
