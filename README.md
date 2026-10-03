@@ -10,7 +10,7 @@ A cross-platform desktop tool for astrophotographers to frame deep-sky targets u
 - **Catalog search** — 18,400+ deep-sky objects and 283,000+ aliases (Messier, NGC, IC, Sharpless, RCW, Gum, Barnard, LDN, LBN, Abell, and more) with autosuggest
 - **Camera FOV overlay** — configurable sensor/focal-length profiles with rotation, toggle-on/off
 - **Mosaic planner** — H×V panels with overlap, copy panel coordinates to clipboard
-- **User image overlay** — load plate-solved XISF images and display them in their actual sky position
+- **User image overlay** — load plate-solved images (XISF, FITS, TIFF, PNG/JPEG with AVM) and display them in their actual sky position
 - **Observer locations** — save/load multiple observing sites; timezone auto-detected from coordinates
 - **Altitude chart** — 24-hour target altitude curve with twilight shading, moon altitude curve with phase icon, hover tooltip showing time/altitude/moon
 - **Bookmarks & recent targets** — quick navigation to saved and recently viewed objects
@@ -81,6 +81,7 @@ Push a tag matching `v*` (e.g. `git tag v0.1.4 && git push origin v0.1.4`). The 
 - [Astropy](https://www.astropy.org/) + [Astroplan](https://astroplan.readthedocs.io/) — coordinates, visibility, moon/sun
 - [Reproject](https://reproject.readthedocs.io/) — WCS-aware tile mosaicing
 - [XISF](https://pypi.org/project/xisf/) — PixInsight image loader
+- [tifffile](https://pypi.org/project/tifffile/) and [PyAVM](https://pypi.org/project/PyAVM/) — TIFF loading and AVM sky metadata
 - [TimezoneFinder](https://pypi.org/project/timezonefinder/) — timezone auto-detection
 - [PyInstaller](https://pyinstaller.org/) — cross-platform packaging
 

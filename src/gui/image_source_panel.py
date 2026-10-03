@@ -24,7 +24,10 @@ _tz_finder = TimezoneFinder()
 
 logger = logging.getLogger(__name__)
 
-IMAGE_FILTER = "XISF Images (*.xisf);;All Files (*)"
+IMAGE_FILTER = (
+    "Astro Images (*.xisf *.fit *.fits *.fts *.fz *.fits.gz *.tif *.tiff *.png *.jpg *.jpeg)"
+    ";;All Files (*)"
+)
 
 
 class ImageSourcePanel(QWidget):
@@ -166,7 +169,7 @@ class ImageSourcePanel(QWidget):
 
         btn_row = QHBoxLayout()
         load_btn = QPushButton("Load Image...")
-        load_btn.setToolTip("Load a plate-solved XISF image")
+        load_btn.setToolTip("Load a plate-solved image (XISF, FITS, TIFF, PNG, JPEG)")
         load_btn.clicked.connect(self._on_load)
         btn_row.addWidget(load_btn)
         remove_btn = QPushButton("Remove")

@@ -42,11 +42,14 @@ hiddenimports += [
     'timezonefinder',
     'pytz',
     'PIL',
+    'tifffile',
+    'pyavm',
 ]
 hiddenimports += collect_submodules('qdarktheme')
 hiddenimports += collect_submodules('astroplan')
 hiddenimports += collect_submodules('reproject')
 hiddenimports += collect_submodules('xisf')
+hiddenimports += collect_submodules('pyavm')
 hiddenimports += collect_submodules('timezonefinder')
 
 # Exclude unnecessary modules

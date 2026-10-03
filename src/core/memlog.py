@@ -69,7 +69,7 @@ def _fsync_handlers() -> None:
         pass
 
 
-def log_snapshot(label: str, **extra) -> None:
+def log_snapshot(label: str, /, **extra) -> None:
     rss = _current_rss_bytes()
     max_rss = _max_rss_bytes()
     counts = gc.get_count()
